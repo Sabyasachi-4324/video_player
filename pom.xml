@@ -45,9 +45,12 @@
 	<build>
 		<plugins>
 			<plugin>
-				<groupId>org.springframework.boot</groupId>
-				<artifactId>spring-boot-maven-plugin</artifactId>
-			</plugin>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-maven-plugin</artifactId>
+    <configuration>
+        <mainClass>com.syncvideo.sync_player.SyncPlayerApplication</mainClass>
+    </configuration>
+</plugin>
 		</plugins>
 	</build>
 
