@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>About - Couple Video Player</title>
+    <title>About - Friends Video Player</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -23,7 +23,7 @@
             line-height: 1.6;
         }
 
-        /* HEADER (Matches Index) */
+        /* HEADER */
         header {
             width: 100%;
             padding: 15px 0;
@@ -50,11 +50,8 @@
         /* MAIN CONTAINER */
         .container {
             margin-top: 80px;
-            /* Space for header */
             max-width: 800px;
-            /* Limits width on desktop */
             width: 90%;
-            /* Takes 90% width on mobile */
             margin-left: auto;
             margin-right: auto;
             padding-bottom: 50px;
@@ -121,42 +118,58 @@
             transform: scale(0.95);
         }
 
-        /* --- NEW CSS FOR CONTACT FORM --- */
-        form { display: flex; flex-direction: column; gap: 15px; }
-        
-        input, textarea { 
-            width: 100%; 
-            padding: 12px; 
-            background: #252830; 
-            border: 1px solid #333; 
-            border-radius: 8px; 
-            color: white; 
-            font-size: 1rem; 
-            outline: none; 
-            box-sizing: border-box; 
-            font-family: 'Inter', sans-serif; 
+        /* --- CONTACT FORM CSS --- */
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
         }
-        
-        input:focus, textarea:focus { border-color: var(--accent-color); }
-        textarea { height: 120px; }
-        
-        form button { 
-            padding: 14px; 
-            border: none; 
-            border-radius: 8px; 
-            font-weight: 700; 
-            cursor: pointer; 
-            width: 100%; 
-            font-size: 1rem; 
-            background: var(--accent-color); 
-            color: white; 
-            transition: transform 0.2s; 
-        }
-        
-        form button:hover { opacity: 0.9; }
-        form button:active { transform: scale(0.98); }
 
-        /* MOBILE SPECIFIC FIXES */
+        input,
+        textarea {
+            width: 100%;
+            padding: 12px;
+            background: #252830;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: white;
+            font-size: 1rem;
+            outline: none;
+            box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+        }
+
+        input:focus,
+        textarea:focus {
+            border-color: var(--accent-color);
+        }
+
+        textarea {
+            height: 120px;
+        }
+
+        form button {
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 700;
+            cursor: pointer;
+            width: 100%;
+            font-size: 1rem;
+            background: var(--accent-color);
+            color: white;
+            transition: transform 0.2s;
+        }
+
+        form button:hover {
+            opacity: 0.9;
+        }
+
+        form button:active {
+            transform: scale(0.98);
+        }
+
+        /* MOBILE FIXES */
         @media (max-width: 600px) {
             .container {
                 width: 95%;
@@ -186,13 +199,13 @@
 <body>
 
     <header>
-        <a href="/" class="logo"><span>❤️</span> Couple Video Player</a>
+        <a href="/" class="logo"><span>🍿</span> Friends Video Player</a>
     </header>
 
     <div class="container">
         <div class="card" style="text-align: center;">
             <h1>Watch Together, Anywhere.</h1>
-            <p>Designed for long-distance couples to watch movies in perfect sync.</p>
+            <p>Designed for long-distance friends to watch movies in perfect sync.</p>
             <a href="/" class="back-btn">Go Back to Player</a>
         </div>
 
@@ -201,8 +214,8 @@
             <p>This app does not upload your video files to a server. Instead, it streams the file directly from your
                 device.</p>
             <ol style="padding-left: 20px; color: #ccc;">
-                <li>Create a Room Name (e.g., "DateNight").</li>
-                <li>Share the Room Name with your partner.</li>
+                <li>Create a Room Code.</li>
+                <li>Share the Room Code with your friends.</li>
                 <li>Both of you select the <b>same video file</b> from your own computers.</li>
                 <li>The server checks if the files match.</li>
                 <li>If they match, play/pause is synced automatically!</li>
@@ -222,22 +235,22 @@
         <div class="card">
             <h2>📩 Contact Me</h2>
             <p>Have a feature request or found a bug? Send me a message directly!</p>
-            
+
             <form action="https://formsubmit.co/mohanty.sabyasachi16@gmail.com" method="POST">
                 <input type="hidden" name="_captcha" value="false">
-                <input type="hidden" name="_next" value="http://localhost:8080/about.html">
-                
+
                 <input type="text" name="name" placeholder="Your Name" required>
                 <input type="email" name="email" placeholder="Your Email" required>
-                <textarea name="message" style="resize: none;" placeholder="Write your message here..." required></textarea>
-                
+                <textarea name="message" style="resize: none;" placeholder="Write your message here..."
+                    required></textarea>
+
                 <button type="submit">Send Message</button>
             </form>
         </div>
 
         <div style="text-align: center; color: #555; font-size: 0.8rem;">
             Created with ❤️ by Sabyasachi<br>
-            Version 1.2
+            Version 1.3
         </div>
     </div>
 
