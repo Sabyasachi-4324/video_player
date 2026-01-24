@@ -39,8 +39,13 @@ public class SyncController {
     public ResponseEntity<String> createRoom(@RequestBody String roomId) {
         if (rooms.containsKey(roomId))
             return ResponseEntity.status(409).body("Room already exists");
+
         rooms.put(roomId, new RoomInfo());
+
+        // --- LOGGING RESTORED ---
         System.out.println("✅ LOG: Room Created: " + roomId);
+        System.out.println("📊 LOG: Active Rooms: " + rooms.size());
+
         return ResponseEntity.ok("Room Created");
     }
 
@@ -84,6 +89,10 @@ public class SyncController {
         roomVideoStates.putIfAbsent(roomId, new ConcurrentHashMap<>());
         roomVideoStates.get(roomId).put(message.getSender(), 0.0);
 
+        // --- LOGGING RESTORED ---
+        System.out.println("👥 LOG: Users in Room " + roomId + ": " + room.users);
+        System.out.println("📊 LOG: Active Rooms: " + rooms.size());
+
         VideoMessage response = new VideoMessage("JOIN", message.getSender(), "Joined", 0.0, 0.0);
         response.setActiveUsers(new ArrayList<>(room.users));
         response.setText(room.owner);
@@ -112,18 +121,15 @@ public class SyncController {
         validateAndNotify(roomId);
     }
 
-    // --- 4. REPLAY HANDLER (WITH SAFETY CHECK) ---
+    // --- 4. REPLAY HANDLER ---
     @MessageMapping("/room/{roomId}/replay")
     public void replayVideo(@DestinationVariable String roomId, @Payload VideoMessage message) {
-        // 1. RE-VALIDATE: Do all users still have matching files?
         boolean isSafeToReplay = validateFilesInternal(roomId);
 
         if (isSafeToReplay) {
-            // 2. YES: Send REPLAY command
             messagingTemplate.convertAndSend("/topic/room/" + roomId,
                     new VideoMessage("SYNC", message.getSender(), "REPLAY", 0.0, 0.0));
         } else {
-            // 3. NO: Send ERROR (Forces users to check their files)
             messagingTemplate.convertAndSend("/topic/room/" + roomId,
                     new VideoMessage("ERROR", "System", "File Mismatch during Replay", 0.0, 0.0));
         }
@@ -138,7 +144,6 @@ public class SyncController {
             return;
         }
 
-        // Use the internal check logic
         boolean allMatch = validateFilesInternal(roomId);
         int activeVideoUsers = 0;
         Map<String, Double> usersInRoom = roomVideoStates.get(roomId);
@@ -219,6 +224,7 @@ public class SyncController {
                 if (room.users.isEmpty()) {
                     rooms.remove(roomId);
                     roomVideoStates.remove(roomId);
+                    System.out.println("❌ LOG: Room Destroyed: " + roomId); // Optional Log
                 } else {
                     if (username.equals(room.owner)) {
                         String newOwner = room.users.iterator().next();
