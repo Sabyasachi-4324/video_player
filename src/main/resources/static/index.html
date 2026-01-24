@@ -17,6 +17,7 @@
             --success-color: #10b981;
         }
 
+        /* BODY: Allow vertical scrolling, hide horizontal */
         body {
             font-family: 'Inter', sans-serif;
             background-color: var(--bg-color);
@@ -27,6 +28,8 @@
             align-items: center;
             min-height: 100vh;
             overflow-x: hidden;
+            overflow-y: auto;
+            /* ESSENTIAL FOR MOBILE SCROLLING */
         }
 
         /* HEADER */
@@ -66,7 +69,7 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 5px;
+            gap: 2px;
         }
 
         .header-meta-row {
@@ -108,29 +111,28 @@
         }
 
         #lockBtn {
-            background: none;
-            border: 1px solid #444;
-            color: #aaa;
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 0.75rem;
+            background: transparent;
+            border: none;
+            color: #777;
+            font-size: 1.5rem;
             cursor: pointer;
             display: none;
             align-items: center;
-            gap: 4px;
-            transition: 0.2s;
-            height: 24px;
+            justify-content: center;
+            padding: 0;
+            transition: transform 0.2s, color 0.2s;
+            line-height: 1;
         }
 
         #lockBtn:hover {
-            background: #333;
+            transform: scale(1.15);
             color: white;
+            background: transparent;
         }
 
         #lockBtn.locked {
-            border-color: var(--accent-color);
             color: var(--accent-color);
-            background: rgba(225, 29, 72, 0.1);
+            text-shadow: 0 0 10px rgba(225, 29, 72, 0.4);
         }
 
         .user-welcome-container {
@@ -167,6 +169,7 @@
             padding-bottom: 2px;
         }
 
+        /* CONTAINER - DESKTOP */
         .container {
             margin-top: 110px;
             width: 95%;
@@ -318,7 +321,6 @@
             min-width: 0;
         }
 
-        /* VIDEO CONTROLS CONTAINER (Responsive) */
         .video-controls {
             display: flex;
             justify-content: space-between;
@@ -637,6 +639,7 @@
             background: var(--accent-color);
         }
 
+        /* --- MOBILE RESPONSIVE FIXES --- */
         @media (max-width: 900px) {
             header {
                 height: auto;
@@ -665,17 +668,23 @@
                 order: 2;
             }
 
+            /* ALLOW PAGE TO GROW */
             .container {
                 margin-top: 130px;
-                height: calc(100vh - 130px);
+                height: auto;
+                /* Remove fixed height */
+                min-height: calc(100vh - 130px);
                 flex-direction: column;
                 width: 100%;
                 gap: 10px;
+                padding-bottom: 40px;
+                /* Space at bottom for scrolling */
             }
 
             #player-ui {
                 flex-direction: column;
                 gap: 5px;
+                height: auto;
             }
 
             .video-section {
@@ -692,16 +701,23 @@
                 width: 100%;
             }
 
+            /* Sidebar takes height based on content */
             .sidebar-section {
-                flex: 1;
+                flex: none;
+                width: 100%;
                 max-width: 100%;
-                min-height: 0;
+                height: auto;
                 gap: 5px;
-                padding-bottom: 5px;
             }
 
             .sidebar-box {
                 padding: 10px;
+            }
+
+            /* Give Chat a specific height on mobile so it doesn't squash */
+            #chat-container {
+                height: 500px;
+                min-height: 500px;
             }
 
             #partner-box {
@@ -717,7 +733,6 @@
         @media (max-height: 600px) {
             .container {
                 margin-top: 70px;
-                height: calc(100vh - 70px);
             }
 
             header {
@@ -809,7 +824,7 @@
                 <a href="/about.html" class="about-link">About</a>
                 <span id="status-dot" class="status-dot"></span>
             </div>
-            <button id="lockBtn" onclick="toggleLock()">🔓 Unlocked</button>
+            <button id="lockBtn" onclick="toggleLock()" title="Lock/Unlock Room">🔓</button>
         </div>
 
         <div class="user-welcome-container hidden" id="header-user-info">
@@ -899,12 +914,12 @@
         const lockBtn = document.getElementById('lockBtn');
         const notifSound = new Audio("https://codeskulptor-demos.commondatastorage.googleapis.com/pang/pop.mp3");
 
-        // --- NAME SANITIZER (Letters + Space Only) ---
+        // --- NAME SANITIZER ---
         document.getElementById('username').addEventListener('input', function (e) {
             this.value = this.value.replace(/[^a-zA-Z\s]/g, '');
         });
 
-        // --- ROOM CODE SANITIZER (Digits Only) ---
+        // --- ROOM CODE SANITIZER ---
         document.getElementById('roomId').addEventListener('input', function (e) {
             this.value = this.value.replace(/\D/g, '');
         });
@@ -1092,7 +1107,14 @@
                 else if (data.sender !== username) {
                     isRemoteUpdate = true;
                     if (Math.abs(player.currentTime - data.time) > 0.5) player.currentTime = data.time;
-                    if (data.action === 'PLAY') player.play();
+
+                    if (data.action === 'PLAY') {
+                        var playPromise = player.play();
+                        if (playPromise !== undefined) {
+                            playPromise.catch(error => { console.log("Auto-play prevented (User Interaction needed)"); });
+                        }
+                    }
+
                     if (data.action === 'PAUSE') player.pause();
                     showToast(data.sender + " " + data.action, "bg-blue");
                     setTimeout(() => isRemoteUpdate = false, 300);
@@ -1112,10 +1134,10 @@
 
         function updateLockUI(isLocked) {
             if (isLocked) {
-                lockBtn.innerHTML = "🔒 Locked";
+                lockBtn.innerHTML = "🔒";
                 lockBtn.classList.add("locked");
             } else {
-                lockBtn.innerHTML = "🔓 Unlocked";
+                lockBtn.innerHTML = "🔓";
                 lockBtn.classList.remove("locked");
             }
         }
@@ -1192,7 +1214,13 @@
 
         player.onplay = () => sendSync('PLAY');
         player.onpause = () => sendSync('PAUSE');
-        player.onseeked = () => sendSync('SEEK');
+
+        player.onseeked = () => {
+            sendSync('SEEK');
+            if (!player.paused) {
+                setTimeout(() => sendSync('PLAY'), 50);
+            }
+        };
 
         player.onended = () => {
             if (document.fullscreenElement) document.exitFullscreen().catch(err => console.log(err));
