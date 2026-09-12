@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About - Friends Video Player</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0f1014;
+            --panel-color: #181a20;
+            --accent-color: #e11d48;
+            --text-color: #e5e7eb;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 0;
+            line-height: 1.6;
+        }
+
+        /* HEADER */
+        header {
+            width: 100%;
+            padding: 15px 0;
+            background: rgba(24, 26, 32, 0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid #333;
+            position: fixed;
+            top: 0;
+            z-index: 100;
+            text-align: center;
+        }
+
+        .logo {
+            font-weight: 800;
+            font-size: 1.2rem;
+            color: white;
+            text-decoration: none;
+        }
+
+        .logo span {
+            color: var(--accent-color);
+        }
+
+        /* MAIN CONTAINER */
+        .container {
+            margin-top: 80px;
+            max-width: 800px;
+            width: 90%;
+            margin-left: auto;
+            margin-right: auto;
+            padding-bottom: 50px;
+        }
+
+        /* CARDS */
+        .card {
+            background: var(--panel-color);
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 10px;
+            color: white;
+        }
+
+        h2 {
+            color: var(--accent-color);
+            margin-top: 0;
+        }
+
+        p {
+            color: #aaa;
+            margin-bottom: 15px;
+        }
+
+        .feature-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .feature-list li {
+            margin-bottom: 10px;
+            padding-left: 20px;
+            position: relative;
+        }
+
+        .feature-list li::before {
+            content: "✔";
+            color: var(--accent-color);
+            position: absolute;
+            left: 0;
+            font-weight: bold;
+        }
+
+        .back-btn {
+            display: inline-block;
+            background: var(--accent-color);
+            color: white;
+            text-decoration: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            margin-top: 20px;
+            transition: transform 0.2s;
+        }
+
+        .back-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* --- CONTACT FORM CSS --- */
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        input,
+        textarea {
+            width: 100%;
+            padding: 12px;
+            background: #252830;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: white;
+            font-size: 1rem;
+            outline: none;
+            box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+        }
+
+        input:focus,
+        textarea:focus {
+            border-color: var(--accent-color);
+        }
+
+        textarea {
+            height: 120px;
+        }
+
+        form button {
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 700;
+            cursor: pointer;
+            width: 100%;
+            font-size: 1rem;
+            background: var(--accent-color);
+            color: white;
+            transition: transform 0.2s;
+        }
+
+        form button:hover {
+            opacity: 0.9;
+        }
+
+        form button:active {
+            transform: scale(0.98);
+        }
+
+        /* MOBILE FIXES */
+        @media (max-width: 600px) {
+            .container {
+                width: 95%;
+                margin-top: 70px;
+            }
+
+            .card {
+                padding: 20px;
+            }
+
+            h1 {
+                font-size: 1.5rem;
+            }
+
+            h2 {
+                font-size: 1.2rem;
+            }
+
+            p {
+                font-size: 0.9rem;
+                text-align: justify;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <a href="/" class="logo"><span>🍿</span> Friends Video Player</a>
+    </header>
+
+    <div class="container">
+        <div class="card" style="text-align: center;">
+            <h1>Watch Together, Anywhere.</h1>
+            <p>Designed for long-distance friends to watch movies in perfect sync.</p>
+            <a href="/" class="back-btn">Go Back to Player</a>
+        </div>
+
+        <div class="card">
+            <h2>How it Works</h2>
+            <p>This app does not upload your video files to a server. Instead, it streams the file directly from your
+                device.</p>
+            <ol style="padding-left: 20px; color: #ccc;">
+                <li>Create a Room Code.</li>
+                <li>Share the Room Code with your friends.</li>
+                <li>Both of you select the <b>same video file</b> from your own computers.</li>
+                <li>The server checks if the files match.</li>
+                <li>If they match, play/pause is synced automatically!</li>
+            </ol>
+        </div>
+
+        <div class="card">
+            <h2>Features</h2>
+            <ul class="feature-list">
+                <li><b>Privacy First:</b> Your videos never leave your device.</li>
+                <li><b>Perfect Sync:</b> Play, Pause, and Seek are instant.</li>
+                <li><b>Chat & Reactions:</b> Send messages and floating hearts.</li>
+                <li><b>Auto-Resume:</b> Handles network drops and phone locks.</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2>📩 Contact Me</h2>
+            <p>Have a feature request or found a bug? Send me a message directly!</p>
+
+            <form action="https://formsubmit.co/mohanty.sabyasachi16@gmail.com" method="POST">
+                <input type="hidden" name="_captcha" value="false">
+
+                <input type="text" name="name" placeholder="Your Name" required>
+                <input type="email" name="email" placeholder="Your Email" required>
+                <textarea name="message" style="resize: none;" placeholder="Write your message here..."
+                    required></textarea>
+
+                <button type="submit">Send Message</button>
+            </form>
+        </div>
+
+        <div style="text-align: center; color: #555; font-size: 0.8rem;">
+            Created with ❤️ by Sabyasachi<br>
+            Version 1.3
+        </div>
+    </div>
+
+</body>
+
+</html>

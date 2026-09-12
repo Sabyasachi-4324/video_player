@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Friends Video Player - Choose Watch Mode</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <!-- Cinematic Background Ambient Glows -->
+    <div class="bg-glow bg-glow-1"></div>
+    <div class="bg-glow bg-glow-2"></div>
+    <div class="bg-glow bg-glow-3"></div>
+
+    <!-- Decorative Movie Elements -->
+    <div class="decor-popcorn">🍿</div>
+    <div class="decor-play">▶</div>
+
+    <!-- WELCOME MODAL (Moved from local.html) -->
+    <div id="welcome-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-icon-badge">🍿</div>
+            <h1>Friends <span class="gradient-text">Video Player</span></h1>
+            <div class="owner-badge">Created by Sabyasachi</div>
+            <div class="how-to-box">
+                <b class="how-to-title">🚀 How to start:</b>
+                <div class="how-to-steps">
+                    1. Select a <b>Watch Mode</b>.<br>
+                    2. Create a <b>Room Code</b>.<br>
+                    3. Share it with your friends.<br>
+                    4. Enjoy perfect sync! 🍿
+                </div>
+            </div>
+            <p class="welcome-sub">Welcome to your private space.<br>Sync movies, reactions, and chat.</p>
+            <button class="btn-primary" onclick="closeModal('welcome-modal')">
+                <span>🚀 Get Started</span> <span class="arrow-icon">→</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- HEADER -->
+    <header>
+        <a href="/" class="logo">
+            <span class="logo-icon">🍿</span> 
+            <span>Friends <span class="gradient-text">Video Player</span></span>
+        </a>
+
+        <div class="header-right">
+            <div class="header-meta-row">
+                <a href="/about.html" class="about-link">About</a>
+            </div>
+        </div>
+    </header>
+
+    <div id="toast-area"></div>
+
+    <!-- HUB CONTAINER -->
+    <div class="hub-container">
+        <div class="hub-hero">
+            <div class="hub-badge">✨ Choose Your Experience</div>
+            <h1>Select Your <span class="gradient-text">Watch Mode</span></h1>
+            <p>Pick how you and your friends want to sync and enjoy movies together.</p>
+        </div>
+
+        <div class="modes-grid">
+            <!-- MODE 1: Local File Sync -->
+            <div class="mode-card">
+                <div class="mode-icon-box">📂</div>
+                <div class="mode-tag local-tag">Classic Sync</div>
+                <h3>Local File Sync</h3>
+                <p>Everyone selects the same local video file on their device for zero-lag hardware playback and perfect sync.</p>
+                <a href="/local.html" class="btn-primary mode-btn">
+                    <span>Launch Local Mode</span> <span class="arrow">→</span>
+                </a>
+            </div>
+
+            <!-- MODE 2: YouTube Watch Party -->
+            <div class="mode-card featured-card">
+                <div class="popular-badge">Most Popular</div>
+                <div class="mode-icon-box">📺</div>
+                <div class="mode-tag youtube-tag">Infinite Library</div>
+                <h3>YouTube Watch Party</h3>
+                <p>Search and play any YouTube video directly in sync. No downloads required, just search and watch.</p>
+                <a href="/youtube.html" class="btn-primary mode-btn">
+                    <span>Launch YouTube Mode</span> <span class="arrow">→</span>
+                </a>
+            </div>
+
+            <!-- MODE 3: Direct Stream -->
+            <div class="mode-card">
+                <div class="mode-icon-box">📡</div>
+                <div class="mode-tag stream-tag">P2P Private</div>
+                <h3>Direct Stream</h3>
+                <p>One person streams a video file directly from their browser securely to friends without screen sharing or server storage.</p>
+                <a href="/stream.html" class="btn-primary mode-btn">
+                    <span>Launch Stream Mode</span> <span class="arrow">→</span>
+                </a>
+            </div>
+        </div>
+
+        <div class="hub-footer-credit">
+            Created by Sabyasachi 🍿
+        </div>
+    </div>
+
+    <!-- Minimal script to close the modal on the Hub page -->
+    <script>
+        function closeModal(id) {
+            document.getElementById(id).classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
