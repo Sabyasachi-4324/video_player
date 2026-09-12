@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Friends Video Player - YouTube Mode</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="bg-glow bg-glow-1"></div>
+    <div class="bg-glow bg-glow-2"></div>
+    <div class="bg-glow bg-glow-3"></div>
+
+    <div class="decor-popcorn">🍿</div>
+    <div class="decor-play">▶</div>
+
+    <div id="locked-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-icon-badge error-badge">🔒</div>
+            <h2>Room Locked</h2>
+            <p>This room is currently locked by the Host.</p>
+            <button class="btn-secondary" onclick="closeModal('locked-modal')">Okay, I'll try another</button>
+        </div>
+    </div>
+
+    <audio id="notif-sound" src="data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU"></audio>
+
+    <header>
+        <a href="/" class="logo">
+            <span class="logo-icon">🍿</span>
+            <span>Friends <span class="gradient-text">Video Player</span></span>
+        </a>
+
+        <div class="header-right">
+            <button id="camToggleBtn" class="media-btn" onclick="toggleMyCamera()" title="Toggle Video">📹</button>
+            <button id="micToggleBtn" class="media-btn" onclick="toggleMyMic()" title="Toggle Mic">🎙️</button>
+            <div class="status-dot-wrapper" title="Connection Status">
+                <span id="status-dot" class="status-dot"></span>
+            </div>
+            <button id="lockBtn" onclick="toggleLock()" title="Lock/Unlock Room">🔓</button>
+            <button id="exitRoomBtn" onclick="exitRoom()" title="Leave Room" aria-label="Leave Room">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                    <polyline points="16 17 21 12 16 7"></polyline>
+                    <line x1="21" y1="12" x2="9" y2="12"></line>
+                </svg>
+            </button>
+        </div>
+
+        <div class="user-welcome-container hidden" id="header-user-info">
+            <div class="user-welcome">Hi, <b id="display-username">User</b> 👋</div>
+        </div>
+    </header>
+
+    <div id="toast-area"></div>
+
+    <a class="room-back-btn" href="/" title="Back to Home" aria-label="Back to Home">← Back</a>
+
+    <div class="container">
+        <div id="login-screen">
+            <div class="login-header-icon">🎬</div>
+            <h2>Start Your <span class="gradient-text">YouTube Party</span></h2>
+
+            <div class="input-group">
+                <span class="input-icon">👤</span>
+                <input type="text" id="username" placeholder="Your Name" maxlength="15" autocomplete="off">
+            </div>
+
+            <div class="input-group">
+                <span class="input-icon">🎟️</span>
+                <input type="text" id="roomId" placeholder="Room Code (Digits only)" inputmode="numeric" maxlength="10" autocomplete="off">
+            </div>
+
+            <button class="btn-primary create-btn" onclick="enterRoom(true)">
+                <span>＋ Create Room</span>
+            </button>
+            <button class="btn-secondary join-btn" onclick="enterRoom(false)">
+                <span>👥 Join Room</span>
+            </button>
+        </div>
+
+        <div id="player-ui" class="hidden">
+            <div class="video-section">
+                <div class="video-controls">
+                    <div class="room-info">Room: <span id="room-title">...</span></div>
+                    
+                    <div class="yt-search-wrapper" style="display: flex; gap: 8px; flex: 1; max-width: 500px;">
+                        <input type="text" id="ytSearchInput" placeholder="Paste YouTube URL or ID..." style="margin: 0; padding: 8px 14px; border-radius: 10px;">
+                        <button id="ytPlayBtn" class="btn-primary" style="margin: 0; padding: 8px 16px; width: auto; border-radius: 10px;">Play</button>
+                    </div>
+                </div>
+
+                <div id="video-wrapper">
+                    <div id="hearts-container"></div>
+                    <div id="floating-cam-wrapper" class="hidden"></div>
+
+                    <div id="blocker">
+                        <div class="blocker-icon">📺</div>
+                        <h2 id="blocker-msg" class="gradient-text">Waiting for Video</h2>
+                        <p id="blocker-sub">Paste a YouTube link above to start watching.</p>
+                        <a id="open-youtube-btn" class="btn-secondary hidden" target="_blank" rel="noopener noreferrer">Open on YouTube</a>
+                    </div>
+                    
+                    <div id="yt-player-container" style="width: 100%; height: 100%;"></div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <div id="partner-box" class="sidebar-box">
+                    <h3>
+                        <span>👥 Friends</span>
+                        <span class="online-counter-badge"><span id="online-count-dot"></span> Friends Active</span>
+                    </h3>
+                    <ul id="user-list"></ul>
+                </div>
+                <div id="chat-container" class="sidebar-box">
+                    <h3>
+                        <span>💬 Chat</span>
+                        <div class="emoji-bar">
+                            <button class="btn-emoji" onclick="sendReaction('😂')" title="Laugh">😂</button>
+                            <button class="btn-emoji" onclick="sendReaction('😢')" title="Sad">😢</button>
+                            <button class="btn-emoji" onclick="sendReaction('😲')" title="Wow">😲</button>
+                            <button class="btn-emoji" onclick="sendReaction('❤️')" title="Love">❤️</button>
+                        </div>
+                    </h3>
+                    <div id="chat-messages"></div>
+                    <div id="typing-indicator">Friend is typing...</div>
+                    <div id="chat-input-area">
+                        <input type="text" id="chatInput" placeholder="Type a message..." autocomplete="off">
+                        <button id="sendBtn" class="btn-primary" onclick="sendMessage()">➤</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.1/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <script src="script-youtube.js"></script>
+</body>
+
+</html>
