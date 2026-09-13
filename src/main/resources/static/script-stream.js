@@ -43,6 +43,7 @@ const pendingMediaIceCandidates = {};
 const remoteMediaStreams = {};
 const mediaRtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 const remoteAudioElements = {};
+const peerCamActive = {};
 const incomingBroadcastStreams = {};
 
 const camWrapper = document.getElementById('floating-cam-wrapper');
@@ -111,6 +112,11 @@ async function enterRoom(isCreating) {
     if (!nameVal) return showToast("Please enter your name!", "bg-red");
     if (!roomVal) return showToast("Please enter a Room Code!", "bg-red");
 
+    streamPlayer.pause();
+    streamPlayer.removeAttribute('src');
+    streamPlayer.srcObject = null;
+    streamPlayer.load();
+    blocker.classList.remove('hidden');
     username = nameVal;
     currentRoom = roomPrefix + roomVal;
     sessionStorage.setItem('syncPlayerUsername:' + roomMode, username);
@@ -228,6 +234,11 @@ function exitRoom() {
     Object.values(peerConnections).forEach(connection => connection.close());
     Object.values(mediaPeerConnections).forEach(connection => connection.close());
     Object.values(remoteAudioElements).forEach(audio => audio.remove());
+    streamPlayer.pause();
+    streamPlayer.removeAttribute('src');
+    streamPlayer.srcObject = null;
+    streamPlayer.load();
+    blocker.classList.remove('hidden');
     stompClient?.disconnect();
     stompClient = null;
     localStream = null;
@@ -326,6 +337,7 @@ function onMessageReceived(payload) {
     // WEBRTC SIGNALING
     else if (data.type === 'WEBRTC') {
         if (data.action === 'VIDEO_OFF' || data.action === 'CAM_OFF') {
+            peerCamActive[data.sender] = false;
             document.getElementById(`cam-${data.sender}`)?.remove();
             const stream = remoteMediaStreams[data.sender];
             stream?.getVideoTracks().forEach(track => stream.removeTrack(track));
@@ -684,12 +696,9 @@ function addMediaBox(peerName, stream, isLocal = false) {
     document.getElementById('floating-cam-wrapper').classList.remove('hidden');
 }
 
-function handleRemoteTrack(peerName, track) {
-    let stream = remoteMediaStreams[peerName];
-    if (!stream) {
-        stream = new MediaStream();
-        remoteMediaStreams[peerName] = stream;
-    }
+function handleRemoteTrack(peerName, track, incomingStream) {
+    const stream = incomingStream || remoteMediaStreams[peerName] || new MediaStream();
+    remoteMediaStreams[peerName] = stream;
     if (!stream.getTracks().some(existingTrack => existingTrack.id === track.id)) {
         stream.addTrack(track);
     }
@@ -705,7 +714,10 @@ function handleRemoteTrack(peerName, track) {
         audio.srcObject = stream;
         audio.play().catch(() => {});
     } else if (track.kind === 'video') {
-        addMediaBox(peerName, stream);
+        if (peerCamActive[peerName] === true) addMediaBox(peerName, stream);
+        track.onunmute = () => {
+            if (peerCamActive[peerName] === true) addMediaBox(peerName, stream);
+        };
     }
 }
 
@@ -716,6 +728,7 @@ document.addEventListener('pointerdown', () => {
 function sendMediaSignal(target, payload) {
     if (!stompClient || !stompClient.connected || !currentRoom) return;
     payload.media = true;
+    payload.camOn = !!localCamStream;
     stompClient.send("/app/room/" + currentRoom + "/webrtc", {}, JSON.stringify({
         type: 'WEBRTC', sender: username, target: target, text: JSON.stringify(payload), time: 0.0, duration: 0.0
     }));
@@ -743,7 +756,7 @@ async function createMediaPeerConnection(targetUser) {
         peerConnection.onicecandidate = event => {
             if (event.candidate) sendMediaSignal(targetUser, { ice: event.candidate });
         };
-        peerConnection.ontrack = event => handleRemoteTrack(targetUser, event.track);
+        peerConnection.ontrack = event => handleRemoteTrack(targetUser, event.track, event.streams[0]);
     }
     syncMediaTracks(peerConnection);
     const offer = await peerConnection.createOffer();
@@ -771,6 +784,7 @@ async function handleMediaSignal(sender, signal) {
     }
     let peerConnection = mediaPeerConnections[sender];
     if (data.sdp?.type === 'offer') {
+        peerCamActive[sender] = data.camOn === true;
         const offerCollision = peerConnection?.signalingState === 'have-local-offer';
         if (offerCollision && username.localeCompare(sender) < 0) return;
         if (offerCollision) {
@@ -783,7 +797,7 @@ async function handleMediaSignal(sender, signal) {
                 peerConnection.onicecandidate = event => {
                     if (event.candidate) sendMediaSignal(sender, { ice: event.candidate });
                 };
-                peerConnection.ontrack = event => handleRemoteTrack(sender, event.track);
+                peerConnection.ontrack = event => handleRemoteTrack(sender, event.track, event.streams[0]);
             }
         }
         syncMediaTracks(peerConnection);
@@ -800,6 +814,7 @@ async function handleMediaSignal(sender, signal) {
         await peerConnection.setLocalDescription(answer);
         sendMediaSignal(sender, { sdp: peerConnection.localDescription });
     } else if (data.sdp?.type === 'answer' && peerConnection) {
+        peerCamActive[sender] = data.camOn === true;
         await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
         for (const candidate of peerConnection.pendingIceCandidates || []) {
             await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
