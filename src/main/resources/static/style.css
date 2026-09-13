@@ -1226,12 +1226,31 @@ video {
 }
 
 @media (max-width: 900px) {
+    *,
+    *::before,
+    *::after {
+        box-sizing: border-box;
+    }
+
+    body {
+        width: 100%;
+        overflow-x: hidden;
+    }
+
     header {
         height: auto;
         min-height: 75px;
         flex-wrap: wrap;
         padding: 12px 5%;
         gap: 10px;
+    }
+
+    .logo {
+        min-width: 0;
+        max-width: 58%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     .user-welcome-container {
@@ -1251,6 +1270,23 @@ video {
 
     .header-right {
         order: 2;
+        max-width: 42%;
+        gap: 6px;
+    }
+
+    .header-right .media-btn,
+    .header-right .status-dot-wrapper,
+    .header-right #lockBtn,
+    .header-right #exitRoomBtn {
+        flex-shrink: 0;
+    }
+
+    .header-right .media-btn,
+    .header-right .status-dot-wrapper,
+    .header-right #lockBtn,
+    .header-right #exitRoomBtn {
+        width: 34px;
+        height: 34px;
     }
 
     .container {
@@ -1259,41 +1295,86 @@ video {
         min-height: calc(100vh - 140px);
         flex-direction: column;
         width: 100%;
+        left: 0;
+        right: 0;
         gap: 15px;
-        padding-bottom: 40px;
+        padding: 0 12px 40px;
     }
 
     #player-ui {
         flex-direction: column;
         gap: 15px;
         height: auto;
+        width: 100%;
     }
 
     .video-section {
         flex: 0 0 auto;
         width: 100%;
+        min-width: 0;
     }
 
     .video-controls {
         flex-direction: column;
         align-items: stretch;
+        width: 100%;
+        padding: 12px;
     }
 
     #fileInput {
         width: 100%;
+        min-width: 0;
     }
 
     .sidebar-section {
         flex: none;
         width: 100%;
         max-width: 100%;
+        min-width: 0;
         height: auto;
         gap: 15px;
+    }
+
+    .sidebar-box {
+        width: 100%;
+        min-width: 0;
+        padding: 14px;
+    }
+
+    .sidebar-box h3 {
+        gap: 8px;
+        min-width: 0;
+    }
+
+    .online-counter-badge {
+        min-width: 0;
+        white-space: nowrap;
+        font-size: 0.68rem;
+        padding: 3px 7px;
     }
 
     #chat-container {
         height: 480px;
         min-height: 480px;
+    }
+
+    #chat-messages {
+        min-width: 0;
+    }
+
+    #chat-input-area {
+        width: 100%;
+        min-width: 0;
+    }
+
+    #chatInput {
+        min-width: 0;
+        flex: 1 1 auto;
+    }
+
+    #sendBtn {
+        flex: 0 0 48px;
+        padding: 0;
     }
 
     #partner-box {
@@ -1304,6 +1385,7 @@ video {
     #login-screen {
         padding: 35px 25px 25px 25px;
         width: 92%;
+        max-width: calc(100% - 24px);
     }
 }
 
@@ -1340,7 +1422,7 @@ video {
     top: 20px;
     left: 20px;
     right: auto;
-    width: 200px;
+    width: clamp(120px, 34%, 200px);
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -1465,13 +1547,14 @@ video {
     z-index: 200;
     padding: 10px; /* buffer for dragging */
     touch-action: none;
+    width: clamp(120px, 34%, 200px);
 }
 #floating-cam-wrapper:active,
 #floating-cam-wrapper.dragging { cursor: default; }
 
 .cam-box {
     position: relative;
-    width: 180px;
+    width: 100%;
     aspect-ratio: 16/9;
     background: #000;
     border-radius: 12px;

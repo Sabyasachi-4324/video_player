@@ -44,14 +44,7 @@ const negotiationState = {};
 // relay media, or that pair of peers will NEVER connect no matter how many
 // times ICE is restarted. Replace with your own TURN credentials.
 const rtcConfig = {
-    iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        {
-            urls: ['turn:YOUR_TURN_HOST:3478', 'turns:YOUR_TURN_HOST:5349'],
-            username: 'YOUR_TURN_USERNAME',
-            credential: 'YOUR_TURN_CREDENTIAL'
-        }
-    ],
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
     iceTransportPolicy: 'all'
 };
 
@@ -210,9 +203,15 @@ function initCamPeerConnection(peer) {
                 if (pc.connectionState !== 'disconnected') return;
 
                 if (negState.iceRestartAttempts >= 3) {
-                    console.warn(`[WebRTC] ${peer} unreachable after ${negState.iceRestartAttempts} ICE restarts - giving up (likely needs a TURN server). Closing.`);
+                    console.warn(`[WebRTC] ${peer} unreachable after ${negState.iceRestartAttempts} ICE restarts. Rebuilding the peer connection.`);
                     teardownPeerConnection(peer);
-                    showToast(`Couldn't reach ${peer}'s video/audio (network issue)`, "bg-red");
+                    if (roomUsers.includes(peer) && !isLeavingPage) {
+                        setTimeout(() => {
+                            if (roomUsers.includes(peer) && !camPeerConnections[peer]) {
+                                createCamPeerConnection(peer).catch(error => console.warn(`[WebRTC] Rebuild failed for ${peer}`, error));
+                            }
+                        }, 500);
+                    }
                     return;
                 }
 
