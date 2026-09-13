@@ -28,11 +28,16 @@ statusDot.classList.toggle('offline', !navigator.onLine);
 let localCamStream = null;
 let localMicStream = null;
 let isMicMuted = false;
+let camToggleInFlight = false;
+let micToggleInFlight = false;
 const camPeerConnections = {};
 const pendingCamIceCandidates = {};
 const remoteMediaStreams = {};
 const remoteAudioElements = {};
-const peerCamActive = {}; 
+const peerCamActive = {};
+// Per-peer negotiation bookkeeping (Perfect Negotiation pattern)
+// { makingOffer, ignoreOffer, isPolite, disconnectTimer }
+const negotiationState = {};
 const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
 const savedRoom = sessionStorage.getItem('syncPlayerRoom:' + roomMode);
@@ -90,6 +95,25 @@ function enableCamDragging(box) {
 }
 
 // --- WEBRTC CORE HELPERS (CRASH-PROOF) ---
+
+// Deterministic "polite" peer assignment so simultaneous offers (glare) resolve
+// the same way on both ends instead of both sides rejecting each other's offer.
+function isPolitePeer(peer) {
+    return username > peer;
+}
+
+function getNegState(peer) {
+    if (!negotiationState[peer]) {
+        negotiationState[peer] = {
+            makingOffer: false,
+            ignoreOffer: false,
+            isPolite: isPolitePeer(peer),
+            disconnectTimer: null
+        };
+    }
+    return negotiationState[peer];
+}
+
 function getTransceiver(pc, kind) {
     if (!pc || pc.signalingState === 'closed') {
         console.warn(`[WebRTC] PeerConnection is closed. Cannot get ${kind} transceiver.`);
@@ -99,14 +123,39 @@ function getTransceiver(pc, kind) {
     if (!tc) {
         try {
             console.log(`[WebRTC] Creating new ${kind} transceiver`);
-            const hasLocalTrack = kind === 'video' ? !!localCamStream : !!localMicStream;
-            tc = pc.addTransceiver(kind, { direction: hasLocalTrack ? 'sendrecv' : 'recvonly' });
+            tc = pc.addTransceiver(kind, { direction: 'recvonly' });
         } catch (e) {
             console.error(`[WebRTC] Failed to add ${kind} transceiver:`, e);
             return null;
         }
     }
     return tc;
+}
+
+// A transceiver's direction is fixed at creation time and replaceTrack() alone
+// does NOT change it. If we don't flip recvonly -> sendrecv here, the track
+// gets attached to the sender but WebRTC silently never transmits it - this
+// was the main cause of "camera on but the other person sees nothing".
+function setTransceiverSending(tc, sending) {
+    if (!tc) return;
+    if (sending) {
+        if (tc.direction === 'recvonly') tc.direction = 'sendrecv';
+        else if (tc.direction === 'inactive') tc.direction = 'sendonly';
+    } else {
+        if (tc.direction === 'sendrecv') tc.direction = 'recvonly';
+        else if (tc.direction === 'sendonly') tc.direction = 'inactive';
+    }
+}
+
+async function attachTrackToTransceiver(pc, kind, track) {
+    const tc = getTransceiver(pc, kind);
+    if (!tc) return;
+    try {
+        await tc.sender.replaceTrack(track);
+        setTransceiverSending(tc, !!track);
+    } catch (e) {
+        console.warn(`[WebRTC] Failed to attach ${kind} track:`, e);
+    }
 }
 
 function initCamPeerConnection(peer) {
@@ -118,22 +167,61 @@ function initCamPeerConnection(peer) {
     const pc = new RTCPeerConnection(rtcConfig);
     camPeerConnections[peer] = pc;
     pendingCamIceCandidates[peer] = [];
+    getNegState(peer);
 
-    // Auto-Cleanup dead connections so they don't block future calls
     pc.onconnectionstatechange = () => {
         console.log(`[WebRTC] Connection state with ${peer}: ${pc.connectionState}`);
-        if (pc.connectionState === 'failed' || pc.connectionState === 'closed' || pc.connectionState === 'disconnected') {
-            console.warn(`[WebRTC] Connection with ${peer} died. Cleaning up.`);
-            pc.close();
-            delete camPeerConnections[peer];
+        const negState = getNegState(peer);
+
+        if (pc.connectionState === 'connected') {
+            clearTimeout(negState.disconnectTimer);
+            negState.disconnectTimer = null;
+            return;
+        }
+
+        if (pc.connectionState === 'disconnected') {
+            // 'disconnected' is frequently a transient ICE blip (a couple of
+            // dropped packets, a brief network hiccup). Give it a grace period
+            // and try an ICE restart instead of nuking the whole connection.
+            clearTimeout(negState.disconnectTimer);
+            negState.disconnectTimer = setTimeout(() => {
+                if (!camPeerConnections[peer]) return;
+                if (pc.connectionState === 'disconnected') {
+                    console.warn(`[WebRTC] ${peer} still disconnected after grace period, restarting ICE`);
+                    try { pc.restartIce(); } catch (e) { console.warn('[WebRTC] restartIce failed', e); }
+                }
+            }, 3000);
+            return;
+        }
+
+        if (pc.connectionState === 'failed') {
+            console.warn(`[WebRTC] Connection with ${peer} failed. Tearing down for a clean retry.`);
+            teardownPeerConnection(peer);
+        } else if (pc.connectionState === 'closed') {
+            teardownPeerConnection(peer, /* pcAlreadyClosed */ true);
         }
     };
 
-    let remoteStream = remoteMediaStreams[peer];
-    if (!remoteStream) {
-        remoteStream = new MediaStream();
-        remoteMediaStreams[peer] = remoteStream;
-    }
+    // Single, centralized place offers get created. Any direction/track change
+    // (see setTransceiverSending) fires this automatically instead of every
+    // caller manually racing its own createOffer().
+    pc.onnegotiationneeded = async () => {
+        const negState = getNegState(peer);
+        if (negState.makingOffer) return;
+        try {
+            negState.makingOffer = true;
+            const offer = await pc.createOffer();
+            if (pc.signalingState !== 'stable') return; // state moved on while we awaited
+            await pc.setLocalDescription(offer);
+            sendCamSignal(peer, { sdp: pc.localDescription, camOn: !!localCamStream, micOn: !!localMicStream && !isMicMuted });
+        } catch (e) {
+            console.error(`[WebRTC] Negotiation failed for ${peer}:`, e);
+        } finally {
+            negState.makingOffer = false;
+        }
+    };
+
+    remoteMediaStreams[peer] = new MediaStream();
 
     getTransceiver(pc, 'video');
     getTransceiver(pc, 'audio');
@@ -144,11 +232,14 @@ function initCamPeerConnection(peer) {
 
     pc.ontrack = e => {
         console.log(`[WebRTC] Received remote ${e.track.kind} track from ${peer}. Enabled: ${e.track.enabled}`);
-        const incomingStream = e.streams[0] || remoteStream;
-        remoteMediaStreams[peer] = incomingStream;
+        const incomingStream = remoteMediaStreams[peer];
         if (!incomingStream.getTracks().includes(e.track)) incomingStream.addTrack(e.track);
+
         e.track.onunmute = () => {
             if (e.track.kind === 'video' && peerCamActive[peer] === true) addVideoBox(peer, incomingStream, false);
+        };
+        e.track.onended = () => {
+            incomingStream.removeTrack(e.track);
         };
 
         if (e.track.kind === 'audio') {
@@ -171,76 +262,87 @@ function initCamPeerConnection(peer) {
     return pc;
 }
 
+// One place that fully tears a peer down: closes the pc (if needed) and wipes
+// every piece of state tied to it (ICE queue, negotiation flags, remote
+// stream, UI). Previously only the explicit LEAVE handler did this, so a
+// connection killed by 'failed'/'disconnected' left stale streams and DOM
+// nodes behind that corrupted the next reconnect.
+function teardownPeerConnection(peer, pcAlreadyClosed = false) {
+    const pc = camPeerConnections[peer];
+    if (pc && !pcAlreadyClosed && pc.signalingState !== 'closed') {
+        pc.close();
+    }
+    if (negotiationState[peer]) clearTimeout(negotiationState[peer].disconnectTimer);
+
+    delete camPeerConnections[peer];
+    delete pendingCamIceCandidates[peer];
+    delete negotiationState[peer];
+    delete remoteMediaStreams[peer];
+    delete peerCamActive[peer];
+
+    document.getElementById(`cam-${peer}`)?.remove();
+    if (remoteAudioElements[peer]) {
+        remoteAudioElements[peer].remove();
+        delete remoteAudioElements[peer];
+    }
+    if (camWrapper.children.length === 0) camWrapper.classList.add('hidden');
+}
+
 // --- CAMERA & MIC CONTROL ---
 async function toggleMyCamera() {
+    if (camToggleInFlight) return;
+    camToggleInFlight = true;
     console.log(`[Media] toggleMyCamera called. Current state: ${localCamStream ? 'ON' : 'OFF'}`);
     const camBtn = document.getElementById('camToggleBtn');
 
-    if (localCamStream) {
-        // TURN OFF
-        localCamStream.getVideoTracks().forEach(t => t.stop());
-        localCamStream = null;
-        camBtn.classList.remove('active');
-        document.getElementById(`cam-${username}`)?.remove();
-        if (camWrapper.children.length === 0) camWrapper.classList.add('hidden');
+    try {
+        if (localCamStream) {
+            // TURN OFF
+            localCamStream.getVideoTracks().forEach(t => t.stop());
+            localCamStream = null;
+            camBtn.classList.remove('active');
+            document.getElementById(`cam-${username}`)?.remove();
+            if (camWrapper.children.length === 0) camWrapper.classList.add('hidden');
 
-        // Safely detach video without crashing
-        Object.keys(camPeerConnections).forEach(peer => {
-            const pc = camPeerConnections[peer];
-            const tc = getTransceiver(pc, 'video');
-            if (tc) {
-                tc.sender.replaceTrack(null).catch(e => console.warn(`[WebRTC] replaceTrack(null) failed for ${peer}`, e));
+            for (const peer of Object.keys(camPeerConnections)) {
+                const pc = camPeerConnections[peer];
+                await attachTrackToTransceiver(pc, 'video', null);
             }
-        });
 
-        if (stompClient?.connected && currentRoom) {
-            stompClient.send("/app/room/" + currentRoom + "/webrtc", {}, JSON.stringify({
-                type: 'WEBRTC', sender: username, action: 'CAM_STATE', camOn: false
-            }));
-        }
-        showToast("Camera Off", "bg-red");
-    } else {
-        // TURN ON
-        try {
-            localCamStream = await navigator.mediaDevices.getUserMedia({ video: true });
+            if (stompClient?.connected && currentRoom) {
+                stompClient.send("/app/room/" + currentRoom + "/webrtc", {}, JSON.stringify({
+                    type: 'WEBRTC', sender: username, action: 'CAM_STATE', camOn: false
+                }));
+            }
+            showToast("Camera Off", "bg-red");
+        } else {
+            // TURN ON
+            try {
+                localCamStream = await navigator.mediaDevices.getUserMedia({ video: true });
+            } catch (err) {
+                console.error(`[Media] Camera access failed:`, err);
+                showMediaAccessError("camera", err);
+                return;
+            }
             const videoTrack = localCamStream.getVideoTracks()[0];
-            
+
             camBtn.classList.add('active');
             camWrapper.classList.remove('hidden');
             addVideoBox(username, localCamStream, true);
 
-            // Create or update connections safely
-            roomUsers.forEach(peer => {
-                if (peer !== username) {
-                    let pc = camPeerConnections[peer];
-                    if (pc && pc.signalingState === 'closed') {
-                        delete camPeerConnections[peer];
-                        pc = null;
-                    }
-
-                    if (!pc) {
-                        createCamPeerConnection(peer).catch(() => {});
-                    } else {
-                        const tc = getTransceiver(pc, 'video');
-                        if (tc) {
-                            tc.sender.replaceTrack(videoTrack)
-                                .then(() => {
-                                    if (pc.signalingState === 'stable') {
-                                        return pc.createOffer();
-                                    }
-                                    return null;
-                                })
-                                .then(offer => {
-                                    if (!offer || pc.signalingState !== 'stable') return;
-                                    return pc.setLocalDescription(offer).then(() => {
-                                        sendCamSignal(peer, { sdp: pc.localDescription, camOn: true });
-                                    });
-                                })
-                                .catch(e => console.warn(`[WebRTC] Camera renegotiation failed for ${peer}`, e));
-                        }
-                    }
+            for (const peer of roomUsers) {
+                if (peer === username) continue;
+                let pc = camPeerConnections[peer];
+                if (pc && pc.signalingState === 'closed') {
+                    teardownPeerConnection(peer, true);
+                    pc = null;
                 }
-            });
+                if (!pc) {
+                    createCamPeerConnection(peer).catch(() => {});
+                } else {
+                    await attachTrackToTransceiver(pc, 'video', videoTrack);
+                }
+            }
 
             if (stompClient?.connected && currentRoom) {
                 stompClient.send("/app/room/" + currentRoom + "/webrtc", {}, JSON.stringify({
@@ -248,49 +350,52 @@ async function toggleMyCamera() {
                 }));
             }
             showToast("Camera On", "bg-green");
-        } catch (err) {
-            console.error(`[Media] Camera access failed:`, err);
-            showMediaAccessError("camera", err);
         }
+    } finally {
+        camToggleInFlight = false;
     }
 }
 
 async function toggleMyMic() {
-    if (!localMicStream) {
-        try {
-            localMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (micToggleInFlight) return;
+    micToggleInFlight = true;
+    try {
+        if (!localMicStream) {
+            try {
+                localMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            } catch (err) {
+                showMediaAccessError("microphone", err);
+                return;
+            }
             isMicMuted = false;
             document.getElementById('micToggleBtn').classList.add('active');
 
             const audioTrack = localMicStream.getAudioTracks()[0];
-            roomUsers.forEach(peer => {
-                if (peer !== username) {
-                    let pc = camPeerConnections[peer];
-                    if (pc && pc.signalingState === 'closed') {
-                        delete camPeerConnections[peer];
-                        pc = null;
-                    }
-                    if (!pc) {
-                        createCamPeerConnection(peer).catch(() => {});
-                    } else {
-                        const tc = getTransceiver(pc, 'audio');
-                        if (tc) tc.sender.replaceTrack(audioTrack).catch(()=>{});
-                    }
+            for (const peer of roomUsers) {
+                if (peer === username) continue;
+                let pc = camPeerConnections[peer];
+                if (pc && pc.signalingState === 'closed') {
+                    teardownPeerConnection(peer, true);
+                    pc = null;
                 }
-            });
+                if (!pc) {
+                    createCamPeerConnection(peer).catch(() => {});
+                } else {
+                    await attachTrackToTransceiver(pc, 'audio', audioTrack);
+                }
+            }
 
             updateMicButtons();
             showToast("Microphone On", "bg-green");
             return;
-        } catch (err) {
-            showMediaAccessError("microphone", err);
-            return;
         }
-    }
 
-    isMicMuted = !isMicMuted;
-    localMicStream.getAudioTracks().forEach(t => t.enabled = !isMicMuted);
-    updateMicButtons();
+        isMicMuted = !isMicMuted;
+        localMicStream.getAudioTracks().forEach(t => t.enabled = !isMicMuted);
+        updateMicButtons();
+    } finally {
+        micToggleInFlight = false;
+    }
 }
 
 function showMediaAccessError(device, error) {
@@ -326,8 +431,7 @@ function updateMicButtons() {
 
 function addVideoBox(peerName, stream, isLocal = false) {
     let box = document.getElementById(`cam-${peerName}`);
-    
-    // FORCE refresh the pipeline to fix the black screen bug
+
     if (box) {
         console.log(`[UI] Refreshing video pipeline for ${peerName}`);
         enableCamDragging(box);
@@ -359,7 +463,7 @@ function addVideoBox(peerName, stream, isLocal = false) {
     `;
     enableCamDragging(box);
     camWrapper.appendChild(box);
-    
+
     const video = box.querySelector('video');
     video.srcObject = stream;
     video.muted = true;
@@ -380,24 +484,20 @@ async function createCamPeerConnection(targetUser) {
     const pc = initCamPeerConnection(targetUser);
 
     if (localCamStream) {
-        const tc = getTransceiver(pc, 'video');
-        if (tc) tc.sender.replaceTrack(localCamStream.getVideoTracks()[0]).catch(()=>{});
+        await attachTrackToTransceiver(pc, 'video', localCamStream.getVideoTracks()[0]);
     }
-    if (localMicStream) {
-        const tc = getTransceiver(pc, 'audio');
-        if (tc) tc.sender.replaceTrack(localMicStream.getAudioTracks()[0]).catch(()=>{});
+    if (localMicStream && !isMicMuted) {
+        await attachTrackToTransceiver(pc, 'audio', localMicStream.getAudioTracks()[0]);
     }
-
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    sendCamSignal(targetUser, { sdp: pc.localDescription, camOn: !!localCamStream });
+    // onnegotiationneeded fires automatically from the transceiver/direction
+    // changes above and sends the offer - no manual createOffer needed here.
 }
 
 async function handleCamSignal(sender, signal) {
     if (signal === 'CAM_STATE' || signal?.action === 'CAM_STATE') {
         const data = (typeof signal === 'string') ? JSON.parse(signal) : signal;
         peerCamActive[sender] = data.camOn;
-        
+
         if (data.camOn) {
             const stream = remoteMediaStreams[sender];
             if (stream) addVideoBox(sender, stream, false);
@@ -414,17 +514,32 @@ async function handleCamSignal(sender, signal) {
     if (data.sdp) {
         if (data.sdp.type === 'offer') {
             pc = initCamPeerConnection(sender);
+            const negState = getNegState(sender);
             if (data.camOn) peerCamActive[sender] = true;
+
+            // Perfect Negotiation: if we're also mid-offer (glare), the polite
+            // peer rolls back and accepts the incoming offer; the impolite
+            // peer ignores the incoming one and lets its own offer win.
+            const offerCollision = negState.makingOffer || pc.signalingState !== 'stable';
+            negState.ignoreOffer = !negState.isPolite && offerCollision;
+            if (negState.ignoreOffer) {
+                console.warn(`[WebRTC] Ignoring colliding offer from ${sender} (we are impolite peer)`);
+                return;
+            }
+
+            if (offerCollision) {
+                await Promise.all([
+                    pc.setLocalDescription({ type: 'rollback' }).catch(() => {}),
+                ]);
+            }
 
             await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
 
             if (localCamStream) {
-                const tc = getTransceiver(pc, 'video');
-                if (tc) tc.sender.replaceTrack(localCamStream.getVideoTracks()[0]).catch(()=>{});
+                await attachTrackToTransceiver(pc, 'video', localCamStream.getVideoTracks()[0]);
             }
-            if (localMicStream) {
-                const tc = getTransceiver(pc, 'audio');
-                if (tc) tc.sender.replaceTrack(localMicStream.getAudioTracks()[0]).catch(()=>{});
+            if (localMicStream && !isMicMuted) {
+                await attachTrackToTransceiver(pc, 'audio', localMicStream.getAudioTracks()[0]);
             }
 
             if (pendingCamIceCandidates[sender]) {
@@ -436,12 +551,16 @@ async function handleCamSignal(sender, signal) {
 
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
-            sendCamSignal(sender, { sdp: pc.localDescription, camOn: !!localCamStream });
+            sendCamSignal(sender, { sdp: pc.localDescription, camOn: !!localCamStream, micOn: !!localMicStream && !isMicMuted });
 
             if (data.camOn && remoteMediaStreams[sender]) addVideoBox(sender, remoteMediaStreams[sender], false);
-            
+
         } else if (data.sdp.type === 'answer' && pc && pc.signalingState !== 'closed') {
             if (data.camOn) peerCamActive[sender] = true;
+            if (pc.signalingState !== 'have-local-offer') {
+                // We rolled back or already moved on - stale answer, ignore.
+                return;
+            }
             await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
 
             if (pendingCamIceCandidates[sender]) {
@@ -591,20 +710,17 @@ function exitRoom() {
     if (!currentRoom) return;
     isLeavingPage = true;
     pauseRoomPlayback();
-    
+
     localCamStream?.getTracks().forEach(track => track.stop());
     localMicStream?.getTracks().forEach(track => track.stop());
-    
-    Object.values(camPeerConnections).forEach(connection => {
-        if (connection.signalingState !== 'closed') connection.close();
-    });
-    Object.values(remoteAudioElements).forEach(audio => audio.remove());
+
+    Object.keys(camPeerConnections).forEach(peer => teardownPeerConnection(peer));
     player.pause();
     player.removeAttribute('src');
     player.load();
     blocker.classList.remove('hidden');
     replayOverlay.classList.add('hidden');
-    
+
     stompClient?.disconnect();
     sessionStorage.removeItem('syncPlayerRoom:' + roomMode);
     sessionStorage.removeItem('syncPlayerUsername:' + roomMode);
@@ -694,22 +810,7 @@ function onMessageReceived(payload) {
         showToast(data.sender + " left.", "bg-red");
         addChatMessage("System", data.sender + " left the room.");
 
-        document.getElementById(`cam-${data.sender}`)?.remove();
-        delete remoteMediaStreams[data.sender];
-        delete peerCamActive[data.sender];
-
-        if (camPeerConnections[data.sender]) {
-            if (camPeerConnections[data.sender].signalingState !== 'closed') {
-                camPeerConnections[data.sender].close();
-            }
-            delete camPeerConnections[data.sender];
-        }
-        if (remoteAudioElements[data.sender]) {
-            remoteAudioElements[data.sender].remove();
-            delete remoteAudioElements[data.sender];
-        }
-
-        if (camWrapper.children.length === 0) camWrapper.classList.add('hidden');
+        teardownPeerConnection(data.sender);
 
         if (data.text && data.text !== "Left") {
             if (checkOwnership(data.text)) showToast("You are now the Host 👑", "bg-green");
