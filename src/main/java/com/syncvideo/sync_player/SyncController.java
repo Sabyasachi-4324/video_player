@@ -9,6 +9,7 @@ import org.springframework.messaging.handler.annotation.SendTo;
 import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 
 import java.util.*;
@@ -32,6 +33,18 @@ public class SyncController {
 
     public SyncController(SimpMessagingTemplate messagingTemplate) {
         this.messagingTemplate = messagingTemplate;
+    }
+
+    @Scheduled(fixedDelay = 10000)
+    public void removeEmptyRooms() {
+        rooms.forEach((roomId, room) -> {
+            synchronized (room) {
+                if (room.users.isEmpty() && rooms.remove(roomId, room)) {
+                    roomVideoStates.remove(roomId);
+                    System.out.println("❌ LOG: Empty Room Destroyed: " + roomId);
+                }
+            }
+        });
     }
 
     // --- 1. API ---
@@ -73,32 +86,22 @@ public class SyncController {
                     new VideoMessage("ERROR", message.getSender(), "Room is Locked", 0.0, 0.0));
             return;
         }
-        if (room.users.contains(message.getSender())) {
-            String staleSessionId = sessionUserMap.entrySet().stream()
-                .filter(entry -> message.getSender().equals(entry.getValue())
-                    && roomId.equals(sessionRoomMap.get(entry.getKey())))
-                .map(Map.Entry::getKey)
-                .findFirst()
-                .orElse(null);
-            if (staleSessionId == null) {
-            messagingTemplate.convertAndSend("/topic/room/" + roomId,
-                new VideoMessage("ERROR_NAME_TAKEN", message.getSender(), "Name taken", 0.0, 0.0));
-            return;
+        synchronized (room) {
+            if (room.users.contains(message.getSender())) {
+                messagingTemplate.convertAndSend("/topic/room/" + roomId,
+                        new VideoMessage("ERROR_NAME_TAKEN", message.getSender(), "Name taken", 0.0, 0.0));
+                return;
             }
-            sessionRoomMap.remove(staleSessionId);
-            sessionUserMap.remove(staleSessionId);
-            room.users.remove(message.getSender());
-            roomVideoStates.getOrDefault(roomId, new ConcurrentHashMap<>()).remove(message.getSender());
-        }
-        if (room.users.isEmpty())
-            room.owner = message.getSender();
+            if (room.users.isEmpty())
+                room.owner = message.getSender();
 
-        String sessionId = headerAccessor.getSessionId();
-        sessionRoomMap.put(sessionId, roomId);
-        sessionUserMap.put(sessionId, message.getSender());
-        room.users.add(message.getSender());
-        roomVideoStates.putIfAbsent(roomId, new ConcurrentHashMap<>());
-        roomVideoStates.get(roomId).put(message.getSender(), 0.0);
+            String sessionId = headerAccessor.getSessionId();
+            sessionRoomMap.put(sessionId, roomId);
+            sessionUserMap.put(sessionId, message.getSender());
+            room.users.add(message.getSender());
+            roomVideoStates.putIfAbsent(roomId, new ConcurrentHashMap<>());
+            roomVideoStates.get(roomId).put(message.getSender(), 0.0);
+        }
 
         System.out.println("👥 LOG: Users in Room " + roomId + ": " + room.users);
         System.out.println("📊 LOG: Active Rooms: " + rooms.size());
@@ -241,27 +244,29 @@ public class SyncController {
             if (room != null) {
                 messagingTemplate.convertAndSend("/topic/room/" + roomId,
                         new VideoMessage("SYNC", username, "PAUSE", 0.0, 0.0));
-                room.users.remove(username);
-                if (roomVideoStates.containsKey(roomId))
-                    roomVideoStates.get(roomId).remove(username);
+                synchronized (room) {
+                    room.users.remove(username);
+                    if (roomVideoStates.containsKey(roomId))
+                        roomVideoStates.get(roomId).remove(username);
 
-                if (room.users.isEmpty()) {
-                    rooms.remove(roomId);
-                    roomVideoStates.remove(roomId);
-                    System.out.println("❌ LOG: Room Destroyed: " + roomId);
-                } else {
-                    if (username.equals(room.owner)) {
-                        String newOwner = room.users.iterator().next();
-                        room.owner = newOwner;
-                        VideoMessage msg = new VideoMessage("LEAVE", username, "Left", 0.0, 0.0);
-                        msg.setActiveUsers(new ArrayList<>(room.users));
-                        msg.setText(newOwner);
-                        messagingTemplate.convertAndSend("/topic/room/" + roomId, msg);
+                    if (room.users.isEmpty()) {
+                        rooms.remove(roomId, room);
+                        roomVideoStates.remove(roomId);
+                        System.out.println("❌ LOG: Room Destroyed: " + roomId);
                     } else {
-                        VideoMessage msg = new VideoMessage("LEAVE", username, "Left", 0.0, 0.0);
-                        msg.setActiveUsers(new ArrayList<>(room.users));
-                        msg.setText(room.owner);
-                        messagingTemplate.convertAndSend("/topic/room/" + roomId, msg);
+                        if (username.equals(room.owner)) {
+                            String newOwner = room.users.iterator().next();
+                            room.owner = newOwner;
+                            VideoMessage msg = new VideoMessage("LEAVE", username, "Left", 0.0, 0.0);
+                            msg.setActiveUsers(new ArrayList<>(room.users));
+                            msg.setText(newOwner);
+                            messagingTemplate.convertAndSend("/topic/room/" + roomId, msg);
+                        } else {
+                            VideoMessage msg = new VideoMessage("LEAVE", username, "Left", 0.0, 0.0);
+                            msg.setActiveUsers(new ArrayList<>(room.users));
+                            msg.setText(room.owner);
+                            messagingTemplate.convertAndSend("/topic/room/" + roomId, msg);
+                        }
                     }
                 }
             }

@@ -46,35 +46,36 @@ const remoteAudioElements = {};
 const incomingBroadcastStreams = {};
 
 const camWrapper = document.getElementById('floating-cam-wrapper');
-let isCamDragging = false;
-let camOffsetX = 0;
-let camOffsetY = 0;
-
-camWrapper.addEventListener('pointerdown', event => {
-    if (event.target.closest('.cam-btn')) return;
-    isCamDragging = true;
-    camWrapper.setPointerCapture(event.pointerId);
-    camWrapper.classList.add('dragging');
-});
-camWrapper.addEventListener('pointermove', event => {
-    if (!isCamDragging) return;
-    const parentRect = document.getElementById('video-wrapper').getBoundingClientRect();
-    const currentRect = camWrapper.getBoundingClientRect();
-    const left = Math.min(parentRect.width - currentRect.width, Math.max(0, currentRect.left - parentRect.left + event.movementX));
-    const top = Math.min(parentRect.height - currentRect.height, Math.max(0, currentRect.top - parentRect.top + event.movementY));
-    camOffsetX += left - (currentRect.left - parentRect.left);
-    camOffsetY += top - (currentRect.top - parentRect.top);
-    camWrapper.style.transform = `translate(${camOffsetX}px, ${camOffsetY}px)`;
-});
-camWrapper.addEventListener('pointerup', event => {
-    isCamDragging = false;
-    camWrapper.releasePointerCapture(event.pointerId);
-    camWrapper.classList.remove('dragging');
-});
-camWrapper.addEventListener('pointercancel', () => {
-    isCamDragging = false;
-    camWrapper.classList.remove('dragging');
-});
+function enableCamDragging(box) {
+    if (box.dataset.draggable === 'true') return;
+    box.dataset.draggable = 'true';
+    box.addEventListener('pointerdown', event => {
+        if (event.target.closest('.cam-btn')) return;
+        box._dragStartX = event.clientX;
+        box._dragStartY = event.clientY;
+        box._dragOffsetX = box._dragOffsetX || 0;
+        box._dragOffsetY = box._dragOffsetY || 0;
+        box.setPointerCapture(event.pointerId);
+        box.classList.add('dragging');
+    });
+    box.addEventListener('pointermove', event => {
+        if (!box.hasPointerCapture(event.pointerId)) return;
+        const parentRect = document.getElementById('video-wrapper').getBoundingClientRect();
+        const boxRect = box.getBoundingClientRect();
+        const nextX = Math.min(parentRect.right - boxRect.width, Math.max(parentRect.left, boxRect.left + event.clientX - box._dragStartX));
+        const nextY = Math.min(parentRect.bottom - boxRect.height, Math.max(parentRect.top, boxRect.top + event.clientY - box._dragStartY));
+        box._dragOffsetX += nextX - boxRect.left;
+        box._dragOffsetY += nextY - boxRect.top;
+        box.style.transform = `translate(${box._dragOffsetX}px, ${box._dragOffsetY}px)`;
+        box._dragStartX = event.clientX;
+        box._dragStartY = event.clientY;
+    });
+    box.addEventListener('pointerup', event => {
+        box.releasePointerCapture(event.pointerId);
+        box.classList.remove('dragging');
+    });
+    box.addEventListener('pointercancel', () => box.classList.remove('dragging'));
+}
 
 const savedRoom = sessionStorage.getItem('syncPlayerRoom:' + roomMode);
 const savedUsername = sessionStorage.getItem('syncPlayerUsername:' + roomMode);
@@ -215,7 +216,7 @@ function pauseRoomPlayback() {
 
 window.addEventListener('online', () => { if (currentRoom) connect(false, true); });
 window.addEventListener('offline', () => { setConnectionStatus(false); streamPlayer.pause(); });
-window.addEventListener('pagehide', () => { isLeavingPage = true; pauseRoomPlayback(); });
+window.addEventListener('pagehide', () => { if (currentRoom) exitRoom(); });
 
 function exitRoom() {
     if (!currentRoom) return;
@@ -260,6 +261,7 @@ function onErrorReceived(payload) {
 // --- MESSAGE HANDLER ---
 function onMessageReceived(payload) {
     const data = JSON.parse(payload.body);
+    const wasAlreadyInRoom = roomUsers.includes(data.sender);
     
     // Track active users
     if (data.activeUsers) {
@@ -270,8 +272,8 @@ function onMessageReceived(payload) {
     // Standard Messaging
     if (data.type === 'ERROR_NAME_TAKEN') {
         if (data.sender === username && !hasJoined) {
-            alert("Username '" + username + "' is taken. Please choose another.");
-            window.location.reload();
+            showToast("Username '" + username + "' is already in this room. Please choose another.", "bg-red");
+            exitRoom();
         }
     }
     else if (data.type === 'LOCK_UPDATE') {
@@ -290,15 +292,17 @@ function onMessageReceived(payload) {
     else if (data.type === 'JOIN') {
         if (data.sender === username) hasJoined = true;
         checkOwnership(data.text);
-        showToast(data.sender + " joined!", "bg-blue");
-        addChatMessage("System", data.sender + " joined the room.");
+        if (!wasAlreadyInRoom) {
+            showToast(data.sender + " joined!", "bg-blue");
+            addChatMessage("System", data.sender + " joined the room.");
+        }
         
         // WEBRTC TRIGGER: If Host is broadcasting and a new user joins, send them the stream
         if (amIHost && localStream && data.sender !== username) {
             createPeerConnectionAndOffer(data.sender);
         }
         if ((localCamStream || localMicStream) && data.sender !== username) {
-            createMediaPeerConnection(data.sender);
+            createMediaPeerConnection(data.sender).catch(() => {});
         }
     }
     else if (data.type === 'LEAVE') {
@@ -326,6 +330,10 @@ function onMessageReceived(payload) {
             const stream = remoteMediaStreams[data.sender];
             stream?.getVideoTracks().forEach(track => stream.removeTrack(track));
             if (stream && remoteAudioElements[data.sender]) remoteAudioElements[data.sender].srcObject = stream;
+            mediaPeerConnections[data.sender]?.close();
+            delete mediaPeerConnections[data.sender];
+            delete pendingMediaIceCandidates[data.sender];
+            delete remoteMediaStreams[data.sender];
             if (document.getElementById('floating-cam-wrapper').children.length === 0) {
                 document.getElementById('floating-cam-wrapper').classList.add('hidden');
             }
@@ -336,7 +344,7 @@ function onMessageReceived(payload) {
 
         const signal = JSON.parse(data.text);
         if (signal.media) {
-            handleMediaSignal(data.sender, data.text);
+            handleMediaSignal(data.sender, data.text).catch(() => {});
             return;
         }
         
@@ -665,10 +673,14 @@ function addMediaBox(peerName, stream, isLocal = false) {
         box.innerHTML = `<video autoplay playsinline ${isLocal ? 'muted' : ''}></video>
             ${isLocal ? `<div class="cam-controls"><button class="cam-btn" id="inline-mic-${peerName}" onclick="toggleMyMic()">🎤</button></div>` : ''}
             <div class="cam-label">${peerName}</div>`;
+        enableCamDragging(box);
         document.getElementById('floating-cam-wrapper').appendChild(box);
     }
-    box.querySelector('video').srcObject = stream;
-    if (!isLocal) box.querySelector('video').play().catch(() => {});
+    const video = box.querySelector('video');
+    video.srcObject = stream;
+    video.muted = true;
+    video.onloadedmetadata = () => video.play().catch(() => {});
+    if (!isLocal) video.play().catch(() => {});
     document.getElementById('floating-cam-wrapper').classList.remove('hidden');
 }
 
@@ -702,22 +714,38 @@ document.addEventListener('pointerdown', () => {
 }, { passive: true });
 
 function sendMediaSignal(target, payload) {
+    if (!stompClient || !stompClient.connected || !currentRoom) return;
     payload.media = true;
     stompClient.send("/app/room/" + currentRoom + "/webrtc", {}, JSON.stringify({
         type: 'WEBRTC', sender: username, target: target, text: JSON.stringify(payload), time: 0.0, duration: 0.0
     }));
 }
 
-async function createMediaPeerConnection(targetUser) {
-    mediaPeerConnections[targetUser]?.close();
-    const peerConnection = new RTCPeerConnection(mediaRtcConfig);
-    mediaPeerConnections[targetUser] = peerConnection;
-    peerConnection.onicecandidate = event => {
-        if (event.candidate) sendMediaSignal(targetUser, { ice: event.candidate });
+function syncMediaTracks(peerConnection) {
+    const tracksByKind = {
+        video: localCamStream?.getVideoTracks()[0] || null,
+        audio: localMicStream?.getAudioTracks()[0] || null
     };
-    peerConnection.ontrack = event => handleRemoteTrack(targetUser, event.track);
-    if (localCamStream) localCamStream.getTracks().forEach(track => peerConnection.addTrack(track, localCamStream));
-    if (localMicStream) localMicStream.getTracks().forEach(track => peerConnection.addTrack(track, localMicStream));
+    Object.entries(tracksByKind).forEach(([kind, track]) => {
+        let transceiver = peerConnection.getTransceivers().find(item => item.sender.track?.kind === kind || item.receiver.track?.kind === kind);
+        if (!transceiver) transceiver = peerConnection.addTransceiver(kind, { direction: 'recvonly' });
+        transceiver.sender.replaceTrack(track);
+        transceiver.direction = track ? 'sendrecv' : 'recvonly';
+    });
+}
+
+async function createMediaPeerConnection(targetUser) {
+    let peerConnection = mediaPeerConnections[targetUser];
+    if (peerConnection && peerConnection.signalingState !== 'stable') return;
+    if (!peerConnection) {
+        peerConnection = new RTCPeerConnection(mediaRtcConfig);
+        mediaPeerConnections[targetUser] = peerConnection;
+        peerConnection.onicecandidate = event => {
+            if (event.candidate) sendMediaSignal(targetUser, { ice: event.candidate });
+        };
+        peerConnection.ontrack = event => handleRemoteTrack(targetUser, event.track);
+    }
+    syncMediaTracks(peerConnection);
     const offer = await peerConnection.createOffer();
     await peerConnection.setLocalDescription(offer);
     sendMediaSignal(targetUser, { sdp: peerConnection.localDescription });
@@ -725,24 +753,40 @@ async function createMediaPeerConnection(targetUser) {
 
 function renegotiateMediaPeers() {
     roomUsers.forEach(peer => {
-        if (peer !== username && (localCamStream || localMicStream)) createMediaPeerConnection(peer);
+        if (peer !== username) {
+            mediaPeerConnections[peer]?.close();
+            delete mediaPeerConnections[peer];
+            delete pendingMediaIceCandidates[peer];
+            delete remoteMediaStreams[peer];
+            createMediaPeerConnection(peer).catch(() => {});
+        }
     });
 }
 
 async function handleMediaSignal(sender, signal) {
     const data = JSON.parse(signal);
+    if (data.renegotiate) {
+        createMediaPeerConnection(sender).catch(() => {});
+        return;
+    }
     let peerConnection = mediaPeerConnections[sender];
     if (data.sdp?.type === 'offer') {
-        peerConnection?.close();
-        peerConnection = new RTCPeerConnection(mediaRtcConfig);
-        mediaPeerConnections[sender] = peerConnection;
-        remoteMediaStreams[sender] = new MediaStream();
-        peerConnection.onicecandidate = event => {
-            if (event.candidate) sendMediaSignal(sender, { ice: event.candidate });
-        };
-        peerConnection.ontrack = event => handleRemoteTrack(sender, event.track);
-        if (localCamStream) localCamStream.getTracks().forEach(track => peerConnection.addTrack(track, localCamStream));
-        if (localMicStream) localMicStream.getTracks().forEach(track => peerConnection.addTrack(track, localMicStream));
+        const offerCollision = peerConnection?.signalingState === 'have-local-offer';
+        if (offerCollision && username.localeCompare(sender) < 0) return;
+        if (offerCollision) {
+            await peerConnection.setLocalDescription({ type: 'rollback' });
+        } else {
+            if (!peerConnection) {
+                peerConnection = new RTCPeerConnection(mediaRtcConfig);
+                mediaPeerConnections[sender] = peerConnection;
+                remoteMediaStreams[sender] = new MediaStream();
+                peerConnection.onicecandidate = event => {
+                    if (event.candidate) sendMediaSignal(sender, { ice: event.candidate });
+                };
+                peerConnection.ontrack = event => handleRemoteTrack(sender, event.track);
+            }
+        }
+        syncMediaTracks(peerConnection);
         await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
         for (const candidate of pendingMediaIceCandidates[sender] || []) {
             await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));

@@ -820,7 +820,12 @@ video {
     margin: 0;
     overflow-y: auto;
     flex: 1;
-    scrollbar-width: thin;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+#user-list::-webkit-scrollbar {
+    display: none;
 }
 
 .user-item {
@@ -882,7 +887,12 @@ video {
     border-radius: 14px;
     margin-bottom: 8px;
     border: 1px solid rgba(255, 255, 255, 0.06);
-    scrollbar-width: thin;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+#chat-messages::-webkit-scrollbar {
+    display: none;
 }
 
 .message {
@@ -977,7 +987,7 @@ video {
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    z-index: 2147483647;
+    z-index: 100;
     text-align: center;
     padding: 20px;
     box-sizing: border-box;
@@ -1334,12 +1344,12 @@ video {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    z-index: 2147483647; /* Stays on top of everything */
-    cursor: grab;
+    z-index: 200;
+    pointer-events: none;
 }
 
 #floating-cam-wrapper:active {
-    cursor: grabbing;
+    cursor: default;
 }
 
 .cam-box {
@@ -1352,6 +1362,9 @@ video {
     border: 2px solid rgba(255, 255, 255, 0.2);
     box-shadow: 0 10px 20px rgba(0,0,0,0.5);
     transition: border-color 0.3s;
+    cursor: grab;
+    pointer-events: auto;
+    touch-action: none;
 }
 
 .cam-box.speaking {
@@ -1449,13 +1462,12 @@ video {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    z-index: 2147483647; 
-    cursor: grab;
+    z-index: 200;
     padding: 10px; /* buffer for dragging */
     touch-action: none;
 }
 #floating-cam-wrapper:active,
-#floating-cam-wrapper.dragging { cursor: grabbing; }
+#floating-cam-wrapper.dragging { cursor: default; }
 
 .cam-box {
     position: relative;
@@ -1467,6 +1479,12 @@ video {
     border: 2px solid rgba(255, 255, 255, 0.2);
     box-shadow: 0 10px 20px rgba(0,0,0,0.5);
     pointer-events: auto;
+    cursor: grab;
+    touch-action: none;
+}
+
+.cam-box.dragging {
+    cursor: grabbing;
 }
 .cam-box video {
     width: 100%;

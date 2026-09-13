@@ -108,8 +108,17 @@
 
     <!-- Minimal script to close the modal on the Hub page -->
     <script>
+        const welcomeModal = document.getElementById('welcome-modal');
+
+        if (sessionStorage.getItem('welcomeModalDismissed') === 'true') {
+            welcomeModal.classList.add('hidden');
+        }
+
         function closeModal(id) {
             document.getElementById(id).classList.add('hidden');
+            if (id === 'welcome-modal') {
+                sessionStorage.setItem('welcomeModalDismissed', 'true');
+            }
         }
     </script>
 </body>

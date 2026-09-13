@@ -57,42 +57,36 @@ function showToast(msg, bgClass) {
 
 // --- DRAGGABLE FLOATING CAM ---
 const camWrapper = document.getElementById('floating-cam-wrapper');
-let isCamDragging = false;
-let camDragStartX = 0;
-let camDragStartY = 0;
-let camOffsetX = 0;
-let camOffsetY = 0;
-
-camWrapper.addEventListener('pointerdown', event => {
-    if (event.target.closest('.cam-btn')) return;
-    isCamDragging = true;
-    const rect = camWrapper.getBoundingClientRect();
-    camDragStartX = event.clientX - rect.left;
-    camDragStartY = event.clientY - rect.top;
-    camWrapper.setPointerCapture(event.pointerId);
-    camWrapper.classList.add('dragging');
-});
-
-camWrapper.addEventListener('pointermove', event => {
-    if (!isCamDragging) return;
-    const parentRect = document.getElementById('video-wrapper').getBoundingClientRect();
-    const currentRect = camWrapper.getBoundingClientRect();
-    const nextLeft = Math.min(parentRect.width - currentRect.width, Math.max(0, currentRect.left - parentRect.left + event.movementX));
-    const nextTop = Math.min(parentRect.height - currentRect.height, Math.max(0, currentRect.top - parentRect.top + event.movementY));
-    camOffsetX += nextLeft - (currentRect.left - parentRect.left);
-    camOffsetY += nextTop - (currentRect.top - parentRect.top);
-    camWrapper.style.transform = `translate(${camOffsetX}px, ${camOffsetY}px)`;
-});
-
-camWrapper.addEventListener('pointerup', event => {
-    isCamDragging = false;
-    camWrapper.releasePointerCapture(event.pointerId);
-    camWrapper.classList.remove('dragging');
-});
-camWrapper.addEventListener('pointercancel', () => {
-    isCamDragging = false;
-    camWrapper.classList.remove('dragging');
-});
+function enableCamDragging(box) {
+    if (box.dataset.draggable === 'true') return;
+    box.dataset.draggable = 'true';
+    box.addEventListener('pointerdown', event => {
+        if (event.target.closest('.cam-btn')) return;
+        box._dragStartX = event.clientX;
+        box._dragStartY = event.clientY;
+        box._dragOffsetX = box._dragOffsetX || 0;
+        box._dragOffsetY = box._dragOffsetY || 0;
+        box.setPointerCapture(event.pointerId);
+        box.classList.add('dragging');
+    });
+    box.addEventListener('pointermove', event => {
+        if (!box.hasPointerCapture(event.pointerId)) return;
+        const parentRect = document.getElementById('video-wrapper').getBoundingClientRect();
+        const boxRect = box.getBoundingClientRect();
+        const nextX = Math.min(parentRect.right - boxRect.width, Math.max(parentRect.left, boxRect.left + event.clientX - box._dragStartX));
+        const nextY = Math.min(parentRect.bottom - boxRect.height, Math.max(parentRect.top, boxRect.top + event.clientY - box._dragStartY));
+        box._dragOffsetX += nextX - boxRect.left;
+        box._dragOffsetY += nextY - boxRect.top;
+        box.style.transform = `translate(${box._dragOffsetX}px, ${box._dragOffsetY}px)`;
+        box._dragStartX = event.clientX;
+        box._dragStartY = event.clientY;
+    });
+    box.addEventListener('pointerup', event => {
+        box.releasePointerCapture(event.pointerId);
+        box.classList.remove('dragging');
+    });
+    box.addEventListener('pointercancel', () => box.classList.remove('dragging'));
+}
 
 // --- CAMERA & MIC CONTROL ---
 async function toggleMyCamera() {
@@ -105,7 +99,11 @@ async function toggleMyCamera() {
         document.getElementById(`cam-${username}`)?.remove();
         if(camWrapper.children.length === 0) camWrapper.classList.add('hidden');
         
-        stompClient.send("/app/room/" + currentRoom + "/webrtc", {}, JSON.stringify({ type: 'WEBRTC', sender: username, action: 'VIDEO_OFF' }));
+        if (stompClient && stompClient.connected && currentRoom) {
+            stompClient.send("/app/room/" + currentRoom + "/webrtc", {}, JSON.stringify({
+                type: 'WEBRTC', sender: username, action: 'VIDEO_OFF'
+            }));
+        }
         renegotiateCamPeers();
         showToast("Camera Off", "bg-red");
     } else {
@@ -184,8 +182,10 @@ function updateMicButtons() {
 function addVideoBox(peerName, stream, isLocal = false) {
     const existingBox = document.getElementById(`cam-${peerName}`);
     if (existingBox) {
+        enableCamDragging(existingBox);
         const video = existingBox.querySelector('video');
         video.srcObject = stream;
+        video.muted = true;
         if (!isLocal) video.play().catch(() => {});
         return;
     }
@@ -207,9 +207,13 @@ function addVideoBox(peerName, stream, isLocal = false) {
         ${inlineControls}
         <div class="cam-label">${peerName}</div>
     `;
+    enableCamDragging(box);
     camWrapper.appendChild(box);
-    box.querySelector('video').srcObject = stream;
-    if (!isLocal) box.querySelector('video').play().catch(() => {});
+    const video = box.querySelector('video');
+    video.srcObject = stream;
+    video.muted = true;
+    video.onloadedmetadata = () => video.play().catch(() => {});
+    if (!isLocal) video.play().catch(() => {});
     camWrapper.classList.remove('hidden');
 }
 
@@ -244,21 +248,35 @@ document.addEventListener('pointerdown', () => {
 
 // --- WEBRTC SIGNALING LOGIC ---
 function sendCamSignal(target, payload) {
+    if (!stompClient || !stompClient.connected || !currentRoom) return;
     stompClient.send("/app/room/" + currentRoom + "/webrtc", {}, JSON.stringify({
         type: 'WEBRTC', sender: username, target: target, text: JSON.stringify(payload)
     }));
 }
 
+function syncCamTracks(pc) {
+    const tracksByKind = {
+        video: localCamStream?.getVideoTracks()[0] || null,
+        audio: localMicStream?.getAudioTracks()[0] || null
+    };
+    Object.entries(tracksByKind).forEach(([kind, track]) => {
+        let transceiver = pc.getTransceivers().find(item => item.sender.track?.kind === kind || item.receiver.track?.kind === kind);
+        if (!transceiver) transceiver = pc.addTransceiver(kind, { direction: 'recvonly' });
+        transceiver.sender.replaceTrack(track);
+        transceiver.direction = track ? 'sendrecv' : 'recvonly';
+    });
+}
+
 async function createCamPeerConnection(targetUser) {
-    camPeerConnections[targetUser]?.close();
-    const pc = new RTCPeerConnection(rtcConfig);
-    camPeerConnections[targetUser] = pc;
-
-    pc.onicecandidate = e => { if (e.candidate) sendCamSignal(targetUser, { ice: e.candidate }); };
-    pc.ontrack = e => handleRemoteTrack(targetUser, e.track);
-
-    if (localCamStream) localCamStream.getTracks().forEach(track => pc.addTrack(track, localCamStream));
-    if (localMicStream) localMicStream.getTracks().forEach(track => pc.addTrack(track, localMicStream));
+    let pc = camPeerConnections[targetUser];
+    if (pc && pc.signalingState !== 'stable') return;
+    if (!pc) {
+        pc = new RTCPeerConnection(rtcConfig);
+        camPeerConnections[targetUser] = pc;
+        pc.onicecandidate = e => { if (e.candidate) sendCamSignal(targetUser, { ice: e.candidate }); };
+        pc.ontrack = e => handleRemoteTrack(targetUser, e.track);
+    }
+    syncCamTracks(pc);
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
@@ -271,24 +289,36 @@ async function handleCamSignal(sender, signal) {
         const stream = remoteMediaStreams[sender];
         stream?.getVideoTracks().forEach(track => stream.removeTrack(track));
         if (stream && remoteAudioElements[sender]) remoteAudioElements[sender].srcObject = stream;
+        camPeerConnections[sender]?.close();
+        delete camPeerConnections[sender];
+        delete pendingCamIceCandidates[sender];
+        delete remoteMediaStreams[sender];
         if(camWrapper.children.length === 0) camWrapper.classList.add('hidden');
         return;
     }
 
     const data = JSON.parse(signal);
+    if (data.renegotiate) {
+        createCamPeerConnection(sender).catch(() => {});
+        return;
+    }
     let pc = camPeerConnections[sender];
 
     if (data.sdp) {
         if (data.sdp.type === 'offer') {
-            pc?.close();
-            pc = new RTCPeerConnection(rtcConfig);
-            camPeerConnections[sender] = pc;
-            remoteMediaStreams[sender] = new MediaStream();
-            
-            pc.onicecandidate = e => { if (e.candidate) sendCamSignal(sender, { ice: e.candidate }); };
-            pc.ontrack = e => handleRemoteTrack(sender, e.track);
-            if (localCamStream) localCamStream.getTracks().forEach(track => pc.addTrack(track, localCamStream));
-            if (localMicStream) localMicStream.getTracks().forEach(track => pc.addTrack(track, localMicStream));
+            const offerCollision = pc?.signalingState === 'have-local-offer';
+            if (offerCollision && username.localeCompare(sender) < 0) return;
+            if (offerCollision) {
+                await pc.setLocalDescription({ type: 'rollback' });
+            } else if (!pc) {
+                pc = new RTCPeerConnection(rtcConfig);
+                camPeerConnections[sender] = pc;
+                remoteMediaStreams[sender] = new MediaStream();
+                pc.onicecandidate = e => { if (e.candidate) sendCamSignal(sender, { ice: e.candidate }); };
+                pc.ontrack = e => handleRemoteTrack(sender, e.track);
+            }
+
+            syncCamTracks(pc);
 
             await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
             for (const candidate of pendingCamIceCandidates[sender] || []) {
@@ -314,7 +344,13 @@ async function handleCamSignal(sender, signal) {
 
 function renegotiateCamPeers() {
     roomUsers.forEach(peer => {
-        if (peer !== username && (localCamStream || localMicStream)) createCamPeerConnection(peer);
+        if (peer !== username) {
+            camPeerConnections[peer]?.close();
+            delete camPeerConnections[peer];
+            delete pendingCamIceCandidates[peer];
+            delete remoteMediaStreams[peer];
+            createCamPeerConnection(peer).catch(() => {});
+        }
     });
 }
 
@@ -435,8 +471,7 @@ window.addEventListener('offline', () => {
 });
 
 window.addEventListener('pagehide', () => {
-    isLeavingPage = true;
-    pauseRoomPlayback();
+    if (currentRoom) exitRoom();
 });
 
 function exitRoom() {
@@ -509,18 +544,19 @@ function sendReplay() { stompClient.send("/app/room/" + currentRoom + "/replay",
 
 function onMessageReceived(payload) {
     const data = JSON.parse(payload.body);
+    const wasAlreadyInRoom = roomUsers.includes(data.sender);
     if (data.activeUsers) {
         roomUsers = data.activeUsers;
         updateUserList(roomUsers);
     }
 
     if (data.type === 'WEBRTC') {
-        if (data.action === 'CAM_OFF' || data.action === 'VIDEO_OFF') handleCamSignal(data.sender, data.action);
-        else if (data.target === username) handleCamSignal(data.sender, data.text);
+        if (data.action === 'CAM_OFF' || data.action === 'VIDEO_OFF') handleCamSignal(data.sender, data.action).catch(() => {});
+        else if (data.target === username) handleCamSignal(data.sender, data.text).catch(() => {});
     }
     else if (data.type === 'ERROR_NAME_TAKEN' && data.sender === username && !hasJoined) {
-        alert("Username taken.");
-        window.location.reload();
+        showToast("Username '" + username + "' is already in this room. Please choose another.", "bg-red");
+        exitRoom();
     }
     else if (data.type === 'LOCK_UPDATE') {
         const isLocked = (data.duration === 1.0);
@@ -539,10 +575,12 @@ function onMessageReceived(payload) {
             announceSelectedVideo();
         }
         checkOwnership(data.text);
-        showToast(data.sender + " joined!", "bg-blue");
-        addChatMessage("System", data.sender + " joined the room.");
+        if (!wasAlreadyInRoom) {
+            showToast(data.sender + " joined!", "bg-blue");
+            addChatMessage("System", data.sender + " joined the room.");
+        }
         
-        if ((localCamStream || localMicStream) && data.sender !== username) createCamPeerConnection(data.sender);
+        if ((localCamStream || localMicStream) && data.sender !== username) createCamPeerConnection(data.sender).catch(() => {});
     }
     else if (data.type === 'LEAVE') {
         showToast(data.sender + " left.", "bg-red");
@@ -560,7 +598,7 @@ function onMessageReceived(payload) {
             blocker.classList.remove('hidden');
         }
     }
-    else if (data.type === 'WAIT' || data.type === 'ERROR') {
+    else if ((data.type === 'WAIT' || data.type === 'ERROR') && data.sender === 'Server') {
         player.pause();
         blocker.classList.remove('hidden');
         document.getElementById('blocker-msg').innerText = data.type === 'ERROR' ? "Video Mismatch" : "Friend Changing Video";
