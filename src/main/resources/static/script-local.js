@@ -38,7 +38,22 @@ const peerCamActive = {};
 // Per-peer negotiation bookkeeping (Perfect Negotiation pattern)
 // { makingOffer, ignoreOffer, isPolite, disconnectTimer }
 const negotiationState = {};
-const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+// STUN alone is not enough - it only helps two peers discover their public
+// address. When a direct P2P path is blocked (symmetric NAT, restrictive
+// firewall, cross-network mobile <-> wifi, etc.) you need a TURN server to
+// relay media, or that pair of peers will NEVER connect no matter how many
+// times ICE is restarted. Replace with your own TURN credentials.
+const rtcConfig = {
+    iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        {
+            urls: ['turn:YOUR_TURN_HOST:3478', 'turns:YOUR_TURN_HOST:5349'],
+            username: 'YOUR_TURN_USERNAME',
+            credential: 'YOUR_TURN_CREDENTIAL'
+        }
+    ],
+    iceTransportPolicy: 'all'
+};
 
 const savedRoom = sessionStorage.getItem('syncPlayerRoom:' + roomMode);
 const savedUsername = sessionStorage.getItem('syncPlayerUsername:' + roomMode);
@@ -108,7 +123,8 @@ function getNegState(peer) {
             makingOffer: false,
             ignoreOffer: false,
             isPolite: isPolitePeer(peer),
-            disconnectTimer: null
+            disconnectTimer: null,
+            iceRestartAttempts: 0
         };
     }
     return negotiationState[peer];
@@ -176,20 +192,33 @@ function initCamPeerConnection(peer) {
         if (pc.connectionState === 'connected') {
             clearTimeout(negState.disconnectTimer);
             negState.disconnectTimer = null;
+            negState.iceRestartAttempts = 0; // reset once we actually succeed
             return;
         }
 
         if (pc.connectionState === 'disconnected') {
-            // 'disconnected' is frequently a transient ICE blip (a couple of
-            // dropped packets, a brief network hiccup). Give it a grace period
-            // and try an ICE restart instead of nuking the whole connection.
+            // 'disconnected' is frequently a transient ICE blip. Give it a
+            // grace period and try an ICE restart - but only a few times.
+            // restartIce() fires onnegotiationneeded and sends a fresh offer
+            // over the signaling socket; if the pair genuinely can't reach
+            // each other (no TURN, symmetric NAT, etc.) this would otherwise
+            // retry forever, flooding the signaling connection and starving
+            // it until it drops too. Cap it and give up cleanly instead.
             clearTimeout(negState.disconnectTimer);
             negState.disconnectTimer = setTimeout(() => {
                 if (!camPeerConnections[peer]) return;
-                if (pc.connectionState === 'disconnected') {
-                    console.warn(`[WebRTC] ${peer} still disconnected after grace period, restarting ICE`);
-                    try { pc.restartIce(); } catch (e) { console.warn('[WebRTC] restartIce failed', e); }
+                if (pc.connectionState !== 'disconnected') return;
+
+                if (negState.iceRestartAttempts >= 3) {
+                    console.warn(`[WebRTC] ${peer} unreachable after ${negState.iceRestartAttempts} ICE restarts - giving up (likely needs a TURN server). Closing.`);
+                    teardownPeerConnection(peer);
+                    showToast(`Couldn't reach ${peer}'s video/audio (network issue)`, "bg-red");
+                    return;
                 }
+
+                negState.iceRestartAttempts += 1;
+                console.warn(`[WebRTC] ${peer} still disconnected, ICE restart attempt ${negState.iceRestartAttempts}`);
+                try { pc.restartIce(); } catch (e) { console.warn('[WebRTC] restartIce failed', e); }
             }, 3000);
             return;
         }
