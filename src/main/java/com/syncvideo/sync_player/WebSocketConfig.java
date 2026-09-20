@@ -1,26 +1,43 @@
 package com.syncvideo.sync_player;
 
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
+import org.springframework.web.socket.config.annotation.WebSocketTransportRegistration;
+import org.springframework.web.socket.server.standard.ServletServerContainerFactoryBean;
 
 @Configuration
 @EnableWebSocketMessageBroker
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
+    @Bean
+    public ServletServerContainerFactoryBean createWebSocketContainer() {
+        ServletServerContainerFactoryBean container = new ServletServerContainerFactoryBean();
+        // Overrides Tomcat's default 8KB buffer limit
+        container.setMaxTextMessageBufferSize(512 * 1024);
+        container.setMaxBinaryMessageBufferSize(512 * 1024);
+        return container;
+    }
+
+    @Override
+    public void configureWebSocketTransport(WebSocketTransportRegistration registration) {
+        // Increases Spring STOMP's internal message size limit
+        registration.setMessageSizeLimit(512 * 1024);
+        registration.setSendBufferSizeLimit(512 * 1024);
+        registration.setSendTimeLimit(20000);
+    }
+
     @Override
     public void configureMessageBroker(MessageBrokerRegistry config) {
-        // Creates a "Topic" channel where messages are broadcasted
         config.enableSimpleBroker("/topic");
-        // Tells the server to expect messages starting with /app
         config.setApplicationDestinationPrefixes("/app");
     }
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-        // The "Door" that the HTML page connects to
         registry.addEndpoint("/ws-video").withSockJS();
     }
 }
