@@ -117,7 +117,8 @@ function getNegState(peer) {
             ignoreOffer: false,
             isPolite: isPolitePeer(peer),
             disconnectTimer: null,
-            iceRestartAttempts: 0
+            iceRestartAttempts: 0,
+            suppressNegotiation: false
         };
     }
     return negotiationState[peer];
@@ -167,7 +168,7 @@ async function attachTrackToTransceiver(pc, kind, track) {
     }
 }
 
-function initCamPeerConnection(peer) {
+function initCamPeerConnection(peer, suppressNegotiation = false) {
     if (camPeerConnections[peer] && camPeerConnections[peer].signalingState !== 'closed') {
         return camPeerConnections[peer];
     }
@@ -176,7 +177,8 @@ function initCamPeerConnection(peer) {
     const pc = new RTCPeerConnection(rtcConfig);
     camPeerConnections[peer] = pc;
     pendingCamIceCandidates[peer] = [];
-    getNegState(peer);
+    const negState = getNegState(peer);
+    negState.suppressNegotiation = suppressNegotiation;
 
     pc.onconnectionstatechange = () => {
         console.log(`[WebRTC] Connection state with ${peer}: ${pc.connectionState}`);
@@ -235,6 +237,7 @@ function initCamPeerConnection(peer) {
     // caller manually racing its own createOffer().
     pc.onnegotiationneeded = async () => {
         const negState = getNegState(peer);
+        if (negState.suppressNegotiation) return;
         if (negState.makingOffer) return;
         try {
             negState.makingOffer = true;
@@ -314,6 +317,10 @@ function teardownPeerConnection(peer, pcAlreadyClosed = false) {
         delete remoteAudioElements[peer];
     }
     if (camWrapper.children.length === 0) camWrapper.classList.add('hidden');
+}
+
+function resetCamPeerConnections() {
+    Object.keys(camPeerConnections).forEach(peer => teardownPeerConnection(peer));
 }
 
 // --- CAMERA & MIC CONTROL ---
@@ -541,8 +548,9 @@ async function handleCamSignal(sender, signal) {
 
     if (data.sdp) {
         if (data.sdp.type === 'offer') {
-            pc = initCamPeerConnection(sender);
+            pc = initCamPeerConnection(sender, true);
             const negState = getNegState(sender);
+            negState.suppressNegotiation = true;
             if (data.camOn) peerCamActive[sender] = true;
 
             // Perfect Negotiation: if we're also mid-offer (glare), the polite
@@ -580,6 +588,7 @@ async function handleCamSignal(sender, signal) {
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             sendCamSignal(sender, { sdp: pc.localDescription, camOn: !!localCamStream, micOn: !!localMicStream && !isMicMuted });
+            negState.suppressNegotiation = false;
 
             if (data.camOn && remoteMediaStreams[sender]) addVideoBox(sender, remoteMediaStreams[sender], false);
 
@@ -662,6 +671,7 @@ function connect(forceReconnect = false) {
         isConnecting = false;
         hasJoined = false;
         clearTimeout(reconnectTimer);
+        resetCamPeerConnections();
         setConnectionStatus(true);
         document.getElementById('login-screen').classList.add('hidden');
         document.getElementById('player-ui').classList.remove('hidden');
@@ -823,6 +833,10 @@ function onMessageReceived(payload) {
         if (data.sender === username) {
             hasJoined = true;
             announceSelectedVideo();
+            if (localCamStream || localMicStream) {
+                roomUsers.filter(peer => peer !== username)
+                    .forEach(peer => createCamPeerConnection(peer).catch(() => {}));
+            }
         }
         checkOwnership(data.text);
         if (!wasAlreadyInRoom) {
@@ -830,7 +844,7 @@ function onMessageReceived(payload) {
             addChatMessage("System", data.sender + " joined the room.");
         }
 
-        if (data.sender !== username) {
+        if (data.sender !== username && (localCamStream || localMicStream)) {
             createCamPeerConnection(data.sender).catch(() => {});
         }
     }
@@ -903,7 +917,12 @@ function showFloatingEmoji(char) { const el = document.createElement('div'); el.
 
 chatInput.addEventListener('input', () => stompClient.send("/app/room/" + currentRoom + "/typing", {}, JSON.stringify({ type: 'TYPING', sender: username })));
 let typingHideTimeout;
-function showTypingIndicator(senderName) { document.getElementById('typing-indicator').innerText = senderName + " is typing..."; document.getElementById('typing-indicator').style.opacity = 1; clearTimeout(typingHideTimeout); typingHideTimeout = setTimeout(() => document.getElementById('typing-indicator').style.opacity = 0, 1500); }
+function showTypingIndicator(senderName) { 
+    document.getElementById('typing-indicator').innerText = senderName + " is typing..."; 
+    document.getElementById('typing-indicator').style.opacity = 1; 
+    clearTimeout(typingHideTimeout); 
+    typingHideTimeout = setTimeout(() => document.getElementById('typing-indicator').style.opacity = 0, 1500); 
+}
 function playSound() { notifSound.play().catch(e => console.log(e)); }
 
 function sendMessage() { const msg = chatInput.value; if (!msg) return; stompClient.send("/app/room/" + currentRoom + "/chat", {}, JSON.stringify({ type: 'CHAT', sender: username, text: msg })); chatInput.value = ""; }

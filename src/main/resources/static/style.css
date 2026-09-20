@@ -1241,13 +1241,14 @@ video {
         height: auto;
         min-height: 75px;
         flex-wrap: wrap;
-        padding: 12px 5%;
+        padding: 10px 12px;
         gap: 10px;
     }
 
     .logo {
+        width: 100%;
         min-width: 0;
-        max-width: 58%;
+        max-width: 100%;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -1270,8 +1271,10 @@ video {
 
     .header-right {
         order: 2;
-        max-width: 42%;
+        width: 100%;
+        max-width: none;
         gap: 6px;
+        justify-content: flex-end;
     }
 
     .header-right .media-btn,

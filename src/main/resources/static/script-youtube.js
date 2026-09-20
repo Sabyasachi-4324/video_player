@@ -182,6 +182,7 @@ function connect(isCreating, forceReconnect = false) {
         isConnecting = false;
         hasJoined = false;
         clearTimeout(reconnectTimer);
+        resetMediaPeerConnections();
         setConnectionStatus(true);
         document.getElementById('login-screen').classList.add('hidden');
         document.getElementById('player-ui').classList.remove('hidden');
@@ -232,6 +233,20 @@ function scheduleReconnect() {
         if (navigator.onLine) connect(false);
         else scheduleReconnect();
     }, 2000);
+}
+
+function resetMediaPeerConnections() {
+    Object.keys(mediaPeerConnections).forEach(peer => mediaPeerConnections[peer].close());
+    Object.keys(mediaPeerConnections).forEach(peer => delete mediaPeerConnections[peer]);
+    Object.keys(pendingMediaIceCandidates).forEach(peer => delete pendingMediaIceCandidates[peer]);
+    Object.keys(remoteMediaStreams).forEach(peer => {
+        document.getElementById(`cam-${peer}`)?.remove();
+        remoteAudioElements[peer]?.remove();
+        delete remoteMediaStreams[peer];
+        delete remoteAudioElements[peer];
+        delete peerCamActive[peer];
+    });
+    if (camWrapper.children.length === 0) camWrapper.classList.add('hidden');
 }
 
 function pauseRoomPlayback() {
@@ -425,6 +440,9 @@ function onMessageReceived(payload) {
                     type: 'SYNC', sender: username, action: 'LOAD_YT', text: currentVideoId,
                     time: ytPlayer ? ytPlayer.getCurrentTime() : 0.0, duration: 0.0
                 }));
+            }
+            if (localCamStream || localMicStream) {
+                renegotiateMediaPeers();
             }
         }
         checkOwnership(data.text);
