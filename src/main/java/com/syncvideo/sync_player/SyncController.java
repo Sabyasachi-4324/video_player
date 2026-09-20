@@ -87,20 +87,31 @@ public class SyncController {
             return;
         }
         synchronized (room) {
-            if (room.users.contains(message.getSender())) {
-                messagingTemplate.convertAndSend("/topic/room/" + roomId,
-                        new VideoMessage("ERROR_NAME_TAKEN", message.getSender(), "Name taken", 0.0, 0.0));
-                return;
-            }
-            if (room.users.isEmpty())
-                room.owner = message.getSender();
-
             String sessionId = headerAccessor.getSessionId();
+            boolean isReconnecting = room.users.contains(message.getSender()) 
+                    && roomId.equals(sessionRoomMap.get(sessionId));
+
+            if (room.users.contains(message.getSender()) && !isReconnecting) {
+                // Check if the old session for this user is actually dead
+                boolean sessionExists = sessionUserMap.values().stream()
+                        .anyMatch(u -> u.equals(message.getSender()) && !sessionId.equals(sessionUserMap.get(sessionId)));
+                
+                if (sessionExists) {
+                    messagingTemplate.convertAndSend("/topic/room/" + roomId,
+                            new VideoMessage("ERROR_NAME_TAKEN", message.getSender(), "Name taken", 0.0, 0.0));
+                    return;
+                }
+            }
+
+            if (room.users.isEmpty() || (room.owner != null && room.owner.equals(message.getSender()))) {
+                room.owner = message.getSender();
+            }
+
             sessionRoomMap.put(sessionId, roomId);
             sessionUserMap.put(sessionId, message.getSender());
             room.users.add(message.getSender());
             roomVideoStates.putIfAbsent(roomId, new ConcurrentHashMap<>());
-            roomVideoStates.get(roomId).put(message.getSender(), 0.0);
+            roomVideoStates.get(roomId).putIfAbsent(message.getSender(), 0.0);
         }
 
         System.out.println("👥 LOG: Users in Room " + roomId + ": " + room.users);

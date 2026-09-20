@@ -346,7 +346,7 @@ async function toggleMyCamera() {
 
             if (stompClient?.connected && currentRoom) {
                 stompClient.send("/app/room/" + currentRoom + "/webrtc", {}, JSON.stringify({
-                    type: 'WEBRTC', sender: username, action: 'CAM_STATE', camOn: false
+                    type: 'WEBRTC', sender: username, action: 'CAM_STATE', camOn: false, text: JSON.stringify({ camOn: false })
                 }));
             }
             showToast("Camera Off", "bg-red");
@@ -373,7 +373,7 @@ async function toggleMyCamera() {
                     pc = null;
                 }
                 if (!pc) {
-                    createCamPeerConnection(peer).catch(() => {});
+                    createCamPeerConnection(peer).catch(() => { });
                 } else {
                     await attachTrackToTransceiver(pc, 'video', videoTrack);
                 }
@@ -381,7 +381,7 @@ async function toggleMyCamera() {
 
             if (stompClient?.connected && currentRoom) {
                 stompClient.send("/app/room/" + currentRoom + "/webrtc", {}, JSON.stringify({
-                    type: 'WEBRTC', sender: username, action: 'CAM_STATE', camOn: true
+                    type: 'WEBRTC', sender: username, action: 'CAM_STATE', camOn: true, text: JSON.stringify({ camOn: true })
                 }));
             }
             showToast("Camera On", "bg-green");
@@ -414,7 +414,7 @@ async function toggleMyMic() {
                     pc = null;
                 }
                 if (!pc) {
-                    createCamPeerConnection(peer).catch(() => {});
+                    createCamPeerConnection(peer).catch(() => { });
                 } else {
                     await attachTrackToTransceiver(pc, 'audio', audioTrack);
                 }
@@ -502,8 +502,8 @@ function addVideoBox(peerName, stream, isLocal = false) {
     const video = box.querySelector('video');
     video.srcObject = stream;
     video.muted = true;
-    video.onloadedmetadata = () => video.play().catch(() => {});
-    video.play().catch(() => {});
+    video.onloadedmetadata = () => video.play().catch(() => { });
+    video.play().catch(() => { });
     camWrapper.classList.remove('hidden');
 }
 
@@ -565,7 +565,7 @@ async function handleCamSignal(sender, signal) {
 
             if (offerCollision) {
                 await Promise.all([
-                    pc.setLocalDescription({ type: 'rollback' }).catch(() => {}),
+                    pc.setLocalDescription({ type: 'rollback' }).catch(() => { }),
                 ]);
             }
 
@@ -580,7 +580,7 @@ async function handleCamSignal(sender, signal) {
 
             if (pendingCamIceCandidates[sender]) {
                 for (const candidate of pendingCamIceCandidates[sender]) {
-                    await pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+                    await pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => { });
                 }
                 delete pendingCamIceCandidates[sender];
             }
@@ -602,7 +602,7 @@ async function handleCamSignal(sender, signal) {
 
             if (pendingCamIceCandidates[sender]) {
                 for (const candidate of pendingCamIceCandidates[sender]) {
-                    await pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+                    await pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => { });
                 }
                 delete pendingCamIceCandidates[sender];
             }
@@ -783,7 +783,7 @@ document.getElementById('fileInput').onchange = function (e) {
         let dur = player.duration;
         currentVideoDuration = isNaN(dur) ? 0 : dur;
         sessionStorage.setItem('syncPlayerVideoDuration', currentVideoDuration.toString());
-        stompClient.send("/app/room/" + currentRoom + "/file-check", {}, JSON.stringify({ type: 'FILE_INFO', sender: username, duration: isNaN(dur)?0.0:dur }));
+        stompClient.send("/app/room/" + currentRoom + "/file-check", {}, JSON.stringify({ type: 'FILE_INFO', sender: username, duration: isNaN(dur) ? 0.0 : dur }));
     };
 };
 
@@ -809,9 +809,9 @@ function onMessageReceived(payload) {
 
     if (data.type === 'WEBRTC') {
         if (data.action === 'CAM_STATE' && data.sender !== username) {
-            handleCamSignal(data.sender, data).catch(() => {});
+            handleCamSignal(data.sender, data).catch(() => { });
         } else if (data.target === username) {
-            handleCamSignal(data.sender, data.text).catch(() => {});
+            handleCamSignal(data.sender, data.text).catch(() => { });
         }
     }
     else if (data.type === 'ERROR_NAME_TAKEN' && data.sender === username && !hasJoined) {
@@ -835,7 +835,7 @@ function onMessageReceived(payload) {
             announceSelectedVideo();
             if (localCamStream || localMicStream) {
                 roomUsers.filter(peer => peer !== username)
-                    .forEach(peer => createCamPeerConnection(peer).catch(() => {}));
+                    .forEach(peer => createCamPeerConnection(peer).catch(() => { }));
             }
         }
         checkOwnership(data.text);
@@ -845,7 +845,7 @@ function onMessageReceived(payload) {
         }
 
         if (data.sender !== username && (localCamStream || localMicStream)) {
-            createCamPeerConnection(data.sender).catch(() => {});
+            createCamPeerConnection(data.sender).catch(() => { });
         }
     }
     else if (data.type === 'LEAVE') {
@@ -891,7 +891,7 @@ function onMessageReceived(payload) {
         else if (data.sender !== username) {
             isRemoteUpdate = true;
             if (Math.abs(player.currentTime - data.time) > 0.5) player.currentTime = data.time;
-            if (data.action === 'PLAY') player.play().catch(e=>console.log(e));
+            if (data.action === 'PLAY') player.play().catch(e => console.log(e));
             if (data.action === 'PAUSE') player.pause();
             setTimeout(() => isRemoteUpdate = false, 300);
         }
@@ -913,15 +913,15 @@ function toggleLock() {
 }
 function updateLockUI(isLocked) { lockBtn.innerHTML = isLocked ? "🔒" : "🔓"; lockBtn.classList.toggle("locked", isLocked); }
 function sendReaction(emoji) { stompClient.send("/app/room/" + currentRoom + "/reaction", {}, JSON.stringify({ type: 'REACTION', sender: username, text: emoji })); showFloatingEmoji(emoji); }
-function showFloatingEmoji(char) { const el = document.createElement('div'); el.classList.add('floating-emoji'); el.innerText = char; el.style.left = (Math.random()*80+10)+"%"; document.getElementById('hearts-container').appendChild(el); setTimeout(()=>el.remove(), 3000); }
+function showFloatingEmoji(char) { const el = document.createElement('div'); el.classList.add('floating-emoji'); el.innerText = char; el.style.left = (Math.random() * 80 + 10) + "%"; document.getElementById('hearts-container').appendChild(el); setTimeout(() => el.remove(), 3000); }
 
 chatInput.addEventListener('input', () => stompClient.send("/app/room/" + currentRoom + "/typing", {}, JSON.stringify({ type: 'TYPING', sender: username })));
 let typingHideTimeout;
-function showTypingIndicator(senderName) { 
-    document.getElementById('typing-indicator').innerText = senderName + " is typing..."; 
-    document.getElementById('typing-indicator').style.opacity = 1; 
-    clearTimeout(typingHideTimeout); 
-    typingHideTimeout = setTimeout(() => document.getElementById('typing-indicator').style.opacity = 0, 1500); 
+function showTypingIndicator(senderName) {
+    document.getElementById('typing-indicator').innerText = senderName + " is typing...";
+    document.getElementById('typing-indicator').style.opacity = 1;
+    clearTimeout(typingHideTimeout);
+    typingHideTimeout = setTimeout(() => document.getElementById('typing-indicator').style.opacity = 0, 1500);
 }
 function playSound() { notifSound.play().catch(e => console.log(e)); }
 
