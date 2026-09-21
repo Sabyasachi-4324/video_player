@@ -126,19 +126,20 @@ function getNegState(peer) {
 
 function getTransceiver(pc, kind) {
     if (!pc || pc.signalingState === 'closed') {
-        console.warn(`[WebRTC] PeerConnection is closed. Cannot get ${kind} transceiver.`);
         return null;
     }
-    let tc = pc.getTransceivers().find(t => t.receiver && t.receiver.track && t.receiver.track.kind === kind);
+    
+    // Safely check both sender AND receiver tracks to prevent duplicating BUNDLEs
+    let tc = pc.getTransceivers().find(t => 
+        (t.sender && t.sender.track && t.sender.track.kind === kind) || 
+        (t.receiver && t.receiver.track && t.receiver.track.kind === kind)
+    );
+    
     if (!tc) {
-        try {
-            console.log(`[WebRTC] Creating new ${kind} transceiver`);
-            tc = pc.addTransceiver(kind, { direction: 'recvonly' });
-        } catch (e) {
-            console.error(`[WebRTC] Failed to add ${kind} transceiver:`, e);
-            return null;
-        }
+        console.log(`[WebRTC] Creating new ${kind} transceiver`);
+        tc = pc.addTransceiver(kind, { direction: 'recvonly' });
     }
+    
     return tc;
 }
 
@@ -237,18 +238,20 @@ function initCamPeerConnection(peer, suppressNegotiation = false) {
     // caller manually racing its own createOffer().
     pc.onnegotiationneeded = async () => {
         const negState = getNegState(peer);
-        if (negState.suppressNegotiation) return;
-        if (negState.makingOffer) return;
+        if (negState.suppressNegotiation || negState.makingOffer) return;
+        
         try {
             negState.makingOffer = true;
             const offer = await pc.createOffer();
-            if (pc.signalingState !== 'stable') return; // state moved on while we awaited
+            if (pc.signalingState !== 'stable') return; 
+            
             await pc.setLocalDescription(offer);
             sendCamSignal(peer, { sdp: pc.localDescription, camOn: !!localCamStream, micOn: !!localMicStream && !isMicMuted });
         } catch (e) {
             console.error(`[WebRTC] Negotiation failed for ${peer}:`, e);
         } finally {
-            negState.makingOffer = false;
+            // Hard 500ms cooldown to absorb event loops and stop endless signaling
+            setTimeout(() => { negState.makingOffer = false; }, 500);
         }
     };
 
