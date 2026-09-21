@@ -818,8 +818,9 @@ async function handleMediaSignal(sender, signal) {
                 peerConnection.ontrack = event => handleRemoteTrack(sender, event.track, event.streams[0]);
             }
         }
-        syncMediaTracks(peerConnection);
         await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+        syncMediaTracks(peerConnection);
+        
         for (const candidate of pendingMediaIceCandidates[sender] || []) {
             await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
         }

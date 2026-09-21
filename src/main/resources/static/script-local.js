@@ -254,9 +254,6 @@ function initCamPeerConnection(peer, suppressNegotiation = false) {
 
     remoteMediaStreams[peer] = new MediaStream();
 
-    getTransceiver(pc, 'video');
-    getTransceiver(pc, 'audio');
-
     pc.onicecandidate = e => {
         if (e.candidate) sendCamSignal(peer, { ice: e.candidate });
     };
@@ -588,7 +585,9 @@ async function handleCamSignal(sender, signal) {
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             sendCamSignal(sender, { sdp: pc.localDescription, camOn: !!localCamStream, micOn: !!localMicStream && !isMicMuted });
-            negState.suppressNegotiation = false;
+            
+            // Wait 100ms for the event loop to clear before allowing new negotiations
+            setTimeout(() => { negState.suppressNegotiation = false; }, 100);
 
             if (data.camOn && remoteMediaStreams[sender]) addVideoBox(sender, remoteMediaStreams[sender], false);
 
