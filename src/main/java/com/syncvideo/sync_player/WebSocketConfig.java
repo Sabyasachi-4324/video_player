@@ -13,20 +13,20 @@ import org.springframework.web.socket.server.standard.ServletServerContainerFact
 @EnableWebSocketMessageBroker
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
+    // 1. Override Tomcat's default 8KB buffer limit
     @Bean
     public ServletServerContainerFactoryBean createWebSocketContainer() {
         ServletServerContainerFactoryBean container = new ServletServerContainerFactoryBean();
-        // Overrides Tomcat's default 8KB buffer limit
-        container.setMaxTextMessageBufferSize(512 * 1024);
-        container.setMaxBinaryMessageBufferSize(512 * 1024);
+        container.setMaxTextMessageBufferSize(512 * 1024);   // 512 KB
+        container.setMaxBinaryMessageBufferSize(512 * 1024); // 512 KB
         return container;
     }
 
+    // 2. Override Spring STOMP's internal message size limit
     @Override
     public void configureWebSocketTransport(WebSocketTransportRegistration registration) {
-        // Increases Spring STOMP's internal message size limit
-        registration.setMessageSizeLimit(512 * 1024);
-        registration.setSendBufferSizeLimit(512 * 1024);
+        registration.setMessageSizeLimit(512 * 1024);   // 512 KB
+        registration.setSendBufferSizeLimit(512 * 1024); // 512 KB
         registration.setSendTimeLimit(20000);
     }
 
