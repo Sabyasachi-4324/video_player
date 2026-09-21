@@ -88,19 +88,12 @@ public class SyncController {
         }
         synchronized (room) {
             String sessionId = headerAccessor.getSessionId();
-            boolean isReconnecting = room.users.contains(message.getSender()) 
-                    && roomId.equals(sessionRoomMap.get(sessionId));
 
-            if (room.users.contains(message.getSender()) && !isReconnecting) {
-                // Check if the old session for this user is actually dead
-                boolean sessionExists = sessionUserMap.values().stream()
-                        .anyMatch(u -> u.equals(message.getSender()) && !sessionId.equals(sessionUserMap.get(sessionId)));
-                
-                if (sessionExists) {
-                    messagingTemplate.convertAndSend("/topic/room/" + roomId,
-                            new VideoMessage("ERROR_NAME_TAKEN", message.getSender(), "Name taken", 0.0, 0.0));
-                    return;
-                }
+            if (room.users.contains(message.getSender())) {
+                // Overwrite any old ghost session mapped to this username to allow clean reconnections
+                sessionUserMap.entrySet().removeIf(entry -> 
+                    entry.getValue().equals(message.getSender()) && !entry.getKey().equals(sessionId)
+                );
             }
 
             if (room.users.isEmpty() || (room.owner != null && room.owner.equals(message.getSender()))) {
