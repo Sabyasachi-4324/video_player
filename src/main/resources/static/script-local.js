@@ -468,13 +468,14 @@ function addVideoBox(peerName, stream, isLocal = false) {
     let box = document.getElementById(`cam-${peerName}`);
 
     if (box) {
-        console.log(`[UI] Refreshing video pipeline for ${peerName}`);
         enableCamDragging(box);
         const video = box.querySelector('video');
-        video.srcObject = null;
-        video.srcObject = stream;
-        video.muted = true;
-        video.onloadedmetadata = () => video.play().catch(e => console.warn(`[UI] Re-play failed for ${peerName}`, e));
+        
+        // Only reassign if it is a genuinely new WebRTC stream
+        if (video.srcObject !== stream) {
+            video.srcObject = stream;
+        }
+        
         video.play().catch(e => console.warn(`[UI] Re-play failed for ${peerName}`, e));
         return;
     }
@@ -847,7 +848,12 @@ function onMessageReceived(payload) {
         }
 
         if (data.sender !== username && (localCamStream || localMicStream)) {
-            createCamPeerConnection(data.sender).catch(() => { });
+            // If I am already broadcasting, send my feed to the new user immediately
+            if (typeof createCamPeerConnection === "function") {
+                createCamPeerConnection(data.sender).catch(() => {});
+            } else if (typeof createMediaPeerConnection === "function") {
+                createMediaPeerConnection(data.sender).catch(() => {});
+            }
         }
     }
     else if (data.type === 'LEAVE') {
