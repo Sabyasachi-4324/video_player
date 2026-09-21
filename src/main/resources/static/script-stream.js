@@ -707,10 +707,22 @@ function addMediaBox(peerName, stream, isLocal = false) {
         document.getElementById('floating-cam-wrapper').appendChild(box);
     }
     const video = box.querySelector('video');
-    video.srcObject = stream;
+    
+    // Prevent black screen by only reassigning the stream if it is genuinely new
+    if (video.srcObject !== stream) {
+        video.srcObject = stream;
+    }
+    
     video.muted = true;
-    video.onloadedmetadata = () => video.play().catch(() => {});
-    if (!isLocal) video.play().catch(() => {});
+    video.volume = 1;
+    if (!isLocal) {
+        const playRemoteMedia = () => video.play().catch(() => {
+            showToast("Click the camera window to enable voice", "bg-blue");
+        });
+        video.onloadedmetadata = playRemoteMedia;
+        video.addEventListener('click', playRemoteMedia);
+        playRemoteMedia();
+    }
     document.getElementById('floating-cam-wrapper').classList.remove('hidden');
 }
 
@@ -757,11 +769,25 @@ function syncMediaTracks(peerConnection) {
         video: localCamStream?.getVideoTracks()[0] || null,
         audio: localMicStream?.getAudioTracks()[0] || null
     };
+    
     Object.entries(tracksByKind).forEach(([kind, track]) => {
-        let transceiver = peerConnection.getTransceivers().find(item => item.sender.track?.kind === kind || item.receiver.track?.kind === kind);
-        if (!transceiver) transceiver = peerConnection.addTransceiver(kind, { direction: 'recvonly' });
-        transceiver.sender.replaceTrack(track);
-        transceiver.direction = track ? 'sendrecv' : 'recvonly';
+        // Safely check both sender AND receiver tracks to prevent duplicating BUNDLEs
+        let transceiver = peerConnection.getTransceivers().find(t => 
+            (t.sender && t.sender.track && t.sender.track.kind === kind) || 
+            (t.receiver && t.receiver.track && t.receiver.track.kind === kind)
+        );
+        
+        if (!transceiver) {
+            transceiver = peerConnection.addTransceiver(kind, { direction: 'recvonly' });
+        }
+        
+        if (track) {
+            transceiver.sender.replaceTrack(track);
+            transceiver.direction = 'sendrecv';
+        } else {
+            transceiver.sender.replaceTrack(null);
+            transceiver.direction = 'recvonly';
+        }
     });
 }
 

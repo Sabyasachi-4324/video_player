@@ -16,6 +16,7 @@ const roomPrefix = roomMode + ':';
 let ytPlayer = null;
 let isYtApiReady = false;
 let currentVideoId = "";
+let currentPlaylistId = ""; // Tracks the playlist ID if one is loaded
 
 const blocker = document.getElementById('blocker');
 const statusDot = document.getElementById('status-dot');
@@ -89,27 +90,33 @@ window.onYouTubeIframeAPIReady = function() {
 };
 loadYouTubeAPI();
 
-// Extract IDs from watch, short, embed, live, and youtu.be links.
-function extractVideoID(value) {
+// Extract IDs from watch, short, embed, live, youtu.be, and playlist links.
+function extractMediaData(value) {
     const input = value.trim();
-    if (/^[\w-]{11}$/.test(input)) return input;
+    let videoId = null;
+    let playlistId = null;
 
     try {
         const url = new URL(input);
+        playlistId = url.searchParams.get('list');
+        
         const host = url.hostname.replace(/^www\./, '');
         if (host === 'youtu.be') {
-            const videoId = url.pathname.slice(1).split('/')[0];
-            return /^[\w-]{11}$/.test(videoId) ? videoId : false;
+            videoId = url.pathname.slice(1).split('/')[0];
+        } else if (host === 'youtube.com' || host === 'm.youtube.com') {
+            const pathParts = url.pathname.split('/').filter(Boolean);
+            if (pathParts[0] === 'embed' || pathParts[0] === 'shorts' || pathParts[0] === 'live' || pathParts[0] === 'v') {
+                videoId = pathParts[1];
+            } else {
+                videoId = url.searchParams.get('v');
+            }
         }
-        if (host !== 'youtube.com' && host !== 'm.youtube.com') return false;
-
-        const pathParts = url.pathname.split('/').filter(Boolean);
-        const pathIndex = ['embed', 'shorts', 'live', 'v'].indexOf(pathParts[0]);
-        const videoId = pathIndex >= 0 ? pathParts[1] : url.searchParams.get('v');
-        return videoId && /^[\w-]{11}$/.test(videoId) ? videoId : false;
     } catch (error) {
-        return false;
+        if (/^[\w-]{11}$/.test(input)) videoId = input;
+        else if (/^[\w-]{12,}$/.test(input)) playlistId = input;
     }
+
+    return { videoId, playlistId };
 }
 
 // --- BASIC UI & VALIDATION ---
@@ -142,6 +149,7 @@ async function enterRoom(isCreating) {
         ytPlayer.stopVideo();
     }
     currentVideoId = "";
+    currentPlaylistId = "";
     blocker.classList.remove('hidden');
     username = nameVal;
     currentRoom = roomPrefix + roomVal;
@@ -272,6 +280,7 @@ function exitRoom() {
     Object.values(remoteAudioElements).forEach(audio => audio.remove());
     if (ytPlayer) ytPlayer.stopVideo();
     currentVideoId = "";
+    currentPlaylistId = "";
     blocker.classList.remove('hidden');
     stompClient?.disconnect();
     stompClient = null;
@@ -285,18 +294,7 @@ function exitRoom() {
     sessionStorage.removeItem('syncPlayerUsername:' + roomMode);
     sessionStorage.removeItem('syncPlayerRoom');
     sessionStorage.removeItem('syncPlayerUsername');
-    document.getElementById('username').value = '';
-    document.getElementById('roomId').value = '';
-    document.getElementById('player-ui').classList.add('hidden');
-    document.getElementById('login-screen').classList.remove('hidden');
-    document.querySelector('.room-back-btn').classList.remove('hidden');
-    document.getElementById('header-user-info').classList.add('hidden');
-    document.getElementById('camToggleBtn').style.display = 'none';
-    document.getElementById('micToggleBtn').style.display = 'none';
-    document.getElementById('exitRoomBtn').style.display = 'none';
-    lockBtn.style.display = 'none';
-    setConnectionStatus(navigator.onLine);
-    updateUserList([]);
+    window.location.reload();
 }
 
 function onErrorReceived(payload) {
@@ -307,41 +305,59 @@ function onErrorReceived(payload) {
 // --- YOUTUBE PLAY BUTTON ---
 document.getElementById('ytPlayBtn').onclick = function() {
     const url = document.getElementById('ytSearchInput').value;
-    const videoId = extractVideoID(url);
+    const media = extractMediaData(url);
     
-    if(!videoId) {
-        return showToast("Invalid YouTube URL!", "bg-red");
+    if(!media.videoId && !media.playlistId) {
+        return showToast("Invalid YouTube URL or Playlist!", "bg-red");
     }
 
-    // Broadcast the new video ID to everyone using your existing SYNC payload
+    // Broadcast the new media payload to everyone
     stompClient.send("/app/room/" + currentRoom + "/sync", {}, JSON.stringify({
-        type: 'SYNC', sender: username, action: 'LOAD_YT', text: videoId, time: 0.0, duration: 0.0
+        type: 'SYNC', sender: username, action: 'LOAD_YT', text: JSON.stringify(media), time: 0.0, duration: 0.0
     }));
 };
 
-function initYouTubePlayer(videoId) {
+function initYouTubePlayer(mediaData) {
     if (!isYtApiReady) {
-        setTimeout(() => initYouTubePlayer(videoId), 500);
+        setTimeout(() => initYouTubePlayer(mediaData), 500);
         return;
     }
 
     blocker.classList.add('hidden');
     document.getElementById('open-youtube-btn').classList.add('hidden');
-    currentVideoId = videoId;
+    
+    currentVideoId = mediaData.videoId || "";
+    currentPlaylistId = mediaData.playlistId || "";
+    const index = mediaData.index || 0;
 
     if (ytPlayer) {
-        ytPlayer.loadVideoById(videoId);
+        if (currentPlaylistId) {
+            ytPlayer.loadPlaylist({
+                list: currentPlaylistId,
+                listType: 'playlist',
+                index: index
+            });
+        } else {
+            ytPlayer.loadVideoById(currentVideoId);
+        }
     } else {
+        const playerVars = {
+            'autoplay': 1,
+            'controls': 1,
+            'rel': 0,
+            'enablejsapi': 1,
+            'origin': window.location.origin,
+            'playsinline': 1
+        };
+
+        if (currentPlaylistId) {
+            playerVars.listType = 'playlist';
+            playerVars.list = currentPlaylistId;
+        }
+
         ytPlayer = new YT.Player('yt-player-container', {
-            videoId: videoId,
-            playerVars: {
-                'autoplay': 1,
-                'controls': 1,
-                'rel': 0,
-                'enablejsapi': 1,
-                'origin': window.location.origin,
-                'playsinline': 1
-            },
+            videoId: currentVideoId,
+            playerVars: playerVars,
             events: {
                 'onStateChange': onPlayerStateChange,
                 'onError': onYouTubeError
@@ -363,8 +379,13 @@ function onYouTubeError(event) {
     blocker.classList.remove('hidden');
     document.getElementById('blocker-msg').textContent = 'Video unavailable';
     document.getElementById('blocker-sub').textContent = message;
+    
     const openButton = document.getElementById('open-youtube-btn');
-    openButton.href = 'https://www.youtube.com/watch?v=' + encodeURIComponent(currentVideoId);
+    if (currentPlaylistId) {
+        openButton.href = 'https://www.youtube.com/playlist?list=' + encodeURIComponent(currentPlaylistId);
+    } else if (currentVideoId) {
+        openButton.href = 'https://www.youtube.com/watch?v=' + encodeURIComponent(currentVideoId);
+    }
     openButton.classList.remove('hidden');
     showToast(message, 'bg-red');
 }
@@ -451,12 +472,20 @@ function onMessageReceived(payload) {
             addChatMessage("System", data.sender + " joined the room.");
         }
         
-        // If someone new joins and a video is playing, send them the current video ID and time
-        if (amIHost && ytPlayer && currentVideoId && data.sender !== username) {
+        // If someone new joins and a video/playlist is active, sync their state
+        if (amIHost && ytPlayer && (currentVideoId || currentPlaylistId) && data.sender !== username) {
+            let actualVideoId = currentVideoId;
+            let actualIndex = 0;
+            if (ytPlayer.getVideoData) actualVideoId = ytPlayer.getVideoData().video_id || currentVideoId;
+            if (ytPlayer.getPlaylistIndex) actualIndex = ytPlayer.getPlaylistIndex() || 0;
+
+            const payload = { videoId: actualVideoId, playlistId: currentPlaylistId, index: actualIndex };
+
             stompClient.send("/app/room/" + currentRoom + "/sync", {}, JSON.stringify({
-                type: 'SYNC', sender: username, action: 'LOAD_YT', text: currentVideoId, time: ytPlayer.getCurrentTime(), duration: 0.0
+                type: 'SYNC', sender: username, action: 'LOAD_YT', text: JSON.stringify(payload), time: ytPlayer.getCurrentTime(), duration: 0.0
             }));
         }
+
         if ((localCamStream || localMicStream) && data.sender !== username) {
             createMediaPeerConnection(data.sender).catch(() => {});
         }
@@ -470,12 +499,21 @@ function onMessageReceived(payload) {
         }
     }
     else if (data.type === 'SYNC') {
-        // Load a new YouTube Video
+        // Load a new YouTube Video or Playlist
         if (data.action === 'LOAD_YT') {
-            document.getElementById('ytSearchInput').value = ""; // Clear input
-            initYouTubePlayer(data.text);
+            document.getElementById('ytSearchInput').value = ""; 
             
-            // If the host passed a timestamp (because a late viewer joined), seek to it
+            let media;
+            try {
+                media = JSON.parse(data.text);
+            } catch (e) {
+                // Backwards compatibility for older single-ID broadcasts
+                media = { videoId: data.text, playlistId: null, index: 0 };
+            }
+
+            initYouTubePlayer(media);
+            
+            // If the host passed a timestamp (late viewer joined), seek to it
             if (data.time > 0) {
                 setTimeout(() => {
                     isRemoteUpdate = true;
@@ -691,7 +729,12 @@ function addMediaBox(peerName, stream, isLocal = false) {
         document.getElementById('floating-cam-wrapper').appendChild(box);
     }
     const video = box.querySelector('video');
-    video.srcObject = stream;
+    
+    // Prevent black screen by only reassigning the stream if it is genuinely new
+    if (video.srcObject !== stream) {
+        video.srcObject = stream;
+    }
+    
     video.muted = true;
     video.volume = 1;
     if (!isLocal) {
@@ -751,11 +794,25 @@ function syncMediaTracks(peerConnection) {
         video: localCamStream?.getVideoTracks()[0] || null,
         audio: localMicStream?.getAudioTracks()[0] || null
     };
+    
     Object.entries(tracksByKind).forEach(([kind, track]) => {
-        let transceiver = peerConnection.getTransceivers().find(item => item.sender.track?.kind === kind || item.receiver.track?.kind === kind);
-        if (!transceiver) transceiver = peerConnection.addTransceiver(kind, { direction: 'recvonly' });
-        transceiver.sender.replaceTrack(track);
-        transceiver.direction = track ? 'sendrecv' : 'recvonly';
+        // Safely check both sender AND receiver tracks to prevent duplicating BUNDLEs
+        let transceiver = peerConnection.getTransceivers().find(t => 
+            (t.sender && t.sender.track && t.sender.track.kind === kind) || 
+            (t.receiver && t.receiver.track && t.receiver.track.kind === kind)
+        );
+        
+        if (!transceiver) {
+            transceiver = peerConnection.addTransceiver(kind, { direction: 'recvonly' });
+        }
+        
+        if (track) {
+            transceiver.sender.replaceTrack(track);
+            transceiver.direction = 'sendrecv';
+        } else {
+            transceiver.sender.replaceTrack(null);
+            transceiver.direction = 'recvonly';
+        }
     });
 }
 
