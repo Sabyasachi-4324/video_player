@@ -674,22 +674,28 @@ async function toggleMyCamera() {
 }
 
 async function toggleMyMic() {
-    if (!localMicStream) {
-        try {
-            localMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            isMicMuted = false;
-            updateMicButtons();
-            renegotiateMediaPeers();
-            showToast("Microphone On", "bg-green");
-        } catch (err) {
-            showMediaAccessError("microphone", err);
-        }
+    // If the mic is currently on, completely stop it to release the hardware
+    if (localMicStream) {
+        localMicStream.getAudioTracks().forEach(track => track.stop());
+        localMicStream = null;
+        isMicMuted = true;
+        
+        updateMicButtons();
+        renegotiateMediaPeers();
+        showToast("Microphone Off", "bg-red");
         return;
     }
 
-    isMicMuted = !isMicMuted;
-    localMicStream.getAudioTracks().forEach(track => track.enabled = !isMicMuted);
-    updateMicButtons();
+    // Turn the mic on
+    try {
+        localMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        isMicMuted = false;
+        updateMicButtons();
+        renegotiateMediaPeers();
+        showToast("Microphone On", "bg-green");
+    } catch (err) {
+        showMediaAccessError("microphone", err);
+    }
 }
 
 function showMediaAccessError(device, error) {

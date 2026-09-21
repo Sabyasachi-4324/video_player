@@ -395,39 +395,51 @@ async function toggleMyMic() {
     if (micToggleInFlight) return;
     micToggleInFlight = true;
     try {
-        if (!localMicStream) {
-            try {
-                localMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            } catch (err) {
-                showMediaAccessError("microphone", err);
-                return;
-            }
-            isMicMuted = false;
-            document.getElementById('micToggleBtn').classList.add('active');
-
-            const audioTrack = localMicStream.getAudioTracks()[0];
-            for (const peer of roomUsers) {
-                if (peer === username) continue;
-                let pc = camPeerConnections[peer];
-                if (pc && pc.signalingState === 'closed') {
-                    teardownPeerConnection(peer, true);
-                    pc = null;
-                }
-                if (!pc) {
-                    createCamPeerConnection(peer).catch(() => { });
-                } else {
-                    await attachTrackToTransceiver(pc, 'audio', audioTrack);
-                }
+        // If the mic is currently on, completely stop it to release the hardware
+        if (localMicStream) {
+            localMicStream.getAudioTracks().forEach(track => track.stop());
+            localMicStream = null;
+            isMicMuted = true;
+            
+            // Unbind the audio track from all active peer connections
+            for (const peer of Object.keys(camPeerConnections)) {
+                const pc = camPeerConnections[peer];
+                await attachTrackToTransceiver(pc, 'audio', null);
             }
 
             updateMicButtons();
-            showToast("Microphone On", "bg-green");
+            showToast("Microphone Off", "bg-red");
             return;
         }
 
-        isMicMuted = !isMicMuted;
-        localMicStream.getAudioTracks().forEach(t => t.enabled = !isMicMuted);
+        // Turn the mic on
+        try {
+            localMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (err) {
+            showMediaAccessError("microphone", err);
+            return;
+        }
+        
+        isMicMuted = false;
+        document.getElementById('micToggleBtn').classList.add('active');
+
+        const audioTrack = localMicStream.getAudioTracks()[0];
+        for (const peer of roomUsers) {
+            if (peer === username) continue;
+            let pc = camPeerConnections[peer];
+            if (pc && pc.signalingState === 'closed') {
+                teardownPeerConnection(peer, true);
+                pc = null;
+            }
+            if (!pc) {
+                createCamPeerConnection(peer).catch(() => { });
+            } else {
+                await attachTrackToTransceiver(pc, 'audio', audioTrack);
+            }
+        }
+
         updateMicButtons();
+        showToast("Microphone On", "bg-green");
     } finally {
         micToggleInFlight = false;
     }
