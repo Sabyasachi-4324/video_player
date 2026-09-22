@@ -128,18 +128,18 @@ function getTransceiver(pc, kind) {
     if (!pc || pc.signalingState === 'closed') {
         return null;
     }
-    
+
     // Safely check both sender AND receiver tracks to prevent duplicating BUNDLEs
-    let tc = pc.getTransceivers().find(t => 
-        (t.sender && t.sender.track && t.sender.track.kind === kind) || 
+    let tc = pc.getTransceivers().find(t =>
+        (t.sender && t.sender.track && t.sender.track.kind === kind) ||
         (t.receiver && t.receiver.track && t.receiver.track.kind === kind)
     );
-    
+
     if (!tc) {
         console.log(`[WebRTC] Creating new ${kind} transceiver`);
         tc = pc.addTransceiver(kind, { direction: 'recvonly' });
     }
-    
+
     return tc;
 }
 
@@ -239,12 +239,12 @@ function initCamPeerConnection(peer, suppressNegotiation = false) {
     pc.onnegotiationneeded = async () => {
         const negState = getNegState(peer);
         if (negState.suppressNegotiation || negState.makingOffer) return;
-        
+
         try {
             negState.makingOffer = true;
             const offer = await pc.createOffer();
-            if (pc.signalingState !== 'stable') return; 
-            
+            if (pc.signalingState !== 'stable') return;
+
             await pc.setLocalDescription(offer);
             sendCamSignal(peer, { sdp: pc.localDescription, camOn: !!localCamStream, micOn: !!localMicStream && !isMicMuted });
         } catch (e) {
@@ -327,44 +327,46 @@ function resetCamPeerConnections() {
 async function toggleMyCamera() {
     if (camToggleInFlight) return;
     camToggleInFlight = true;
-    console.log(`[Media] toggleMyCamera called. Current state: ${localCamStream ? 'ON' : 'OFF'}`);
-    const camBtn = document.getElementById('camToggleBtn');
 
     try {
         if (localCamStream) {
-            // TURN OFF
-            localCamStream.getVideoTracks().forEach(t => t.stop());
+            // Hard stop all video tracks to completely release the camera hardware indicator
+            localCamStream.getTracks().forEach(track => track.stop());
             localCamStream = null;
-            camBtn.classList.remove('active');
+
             document.getElementById(`cam-${username}`)?.remove();
             if (camWrapper.children.length === 0) camWrapper.classList.add('hidden');
 
+            // Detach track from all active peer connections
             for (const peer of Object.keys(camPeerConnections)) {
                 const pc = camPeerConnections[peer];
                 await attachTrackToTransceiver(pc, 'video', null);
             }
 
+            // Broadcast video-off state to peers
             if (stompClient?.connected && currentRoom) {
                 stompClient.send("/app/room/" + currentRoom + "/webrtc", {}, JSON.stringify({
                     type: 'WEBRTC', sender: username, action: 'CAM_STATE', camOn: false, text: JSON.stringify({ camOn: false })
                 }));
             }
-            showToast("Camera Off", "bg-red");
+            updateCamButtons();
+            showToast("Camera turned off", "bg-red");
         } else {
-            // TURN ON
+            // Request camera stream (Google Meet default behavior)
             try {
-                localCamStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                localCamStream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" }
+                });
             } catch (err) {
-                console.error(`[Media] Camera access failed:`, err);
                 showMediaAccessError("camera", err);
                 return;
             }
-            const videoTrack = localCamStream.getVideoTracks()[0];
 
-            camBtn.classList.add('active');
+            updateCamButtons();
             camWrapper.classList.remove('hidden');
             addVideoBox(username, localCamStream, true);
 
+            const videoTrack = localCamStream.getVideoTracks()[0];
             for (const peer of roomUsers) {
                 if (peer === username) continue;
                 let pc = camPeerConnections[peer];
@@ -379,12 +381,13 @@ async function toggleMyCamera() {
                 }
             }
 
+            // Broadcast camera-on state to peers
             if (stompClient?.connected && currentRoom) {
                 stompClient.send("/app/room/" + currentRoom + "/webrtc", {}, JSON.stringify({
                     type: 'WEBRTC', sender: username, action: 'CAM_STATE', camOn: true, text: JSON.stringify({ camOn: true })
                 }));
             }
-            showToast("Camera On", "bg-green");
+            showToast("Camera turned on", "bg-green");
         }
     } finally {
         camToggleInFlight = false;
@@ -394,36 +397,39 @@ async function toggleMyCamera() {
 async function toggleMyMic() {
     if (micToggleInFlight) return;
     micToggleInFlight = true;
+
     try {
-        // If the mic is currently on, completely stop it to release the hardware
         if (localMicStream) {
-            localMicStream.getAudioTracks().forEach(track => track.stop());
+            // Hard stop audio tracks so the browser's orange/red microphone indicator turns off completely (Google Meet behavior)
+            localMicStream.getTracks().forEach(track => track.stop());
             localMicStream = null;
             isMicMuted = true;
-            
-            // Unbind the audio track from all active peer connections
+
+            // Detach audio track from peers
             for (const peer of Object.keys(camPeerConnections)) {
                 const pc = camPeerConnections[peer];
-                await attachTrackToTransceiver(pc, 'audio', null);
+                await attachTrackToTransgenceer(pc, 'audio', null); // handled safely via transceiver drop
             }
 
             updateMicButtons();
-            showToast("Microphone Off", "bg-red");
+            showToast("Microphone muted", "bg-red");
             return;
         }
 
-        // Turn the mic on
+        // Request microphone stream
         try {
-            localMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            localMicStream = await navigator.mediaDevices.getUserMedia({
+                audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+            });
         } catch (err) {
             showMediaAccessError("microphone", err);
             return;
         }
-        
-        isMicMuted = false;
-        document.getElementById('micToggleBtn').classList.add('active');
 
+        isMicMuted = false;
         const audioTrack = localMicStream.getAudioTracks()[0];
+
+        // Attach audio track to all peer connections
         for (const peer of roomUsers) {
             if (peer === username) continue;
             let pc = camPeerConnections[peer];
@@ -439,7 +445,7 @@ async function toggleMyMic() {
         }
 
         updateMicButtons();
-        showToast("Microphone On", "bg-green");
+        showToast("Microphone unmuted", "bg-green");
     } finally {
         micToggleInFlight = false;
     }
@@ -457,22 +463,42 @@ function updateMicButtons() {
     const headerMicBtn = document.getElementById('micToggleBtn');
     const inlineMicBtn = document.getElementById(`inline-mic-${username}`);
 
-    if (isMicMuted) {
+    if (!localMicStream || isMicMuted) {
         headerMicBtn.classList.remove('active');
         headerMicBtn.classList.add('muted');
-        headerMicBtn.innerHTML = "🔇";
+        headerMicBtn.innerHTML = "🎤❌"; // Google Meet style crossed-out mic
+        headerMicBtn.style.backgroundColor = "rgba(239, 68, 68, 0.2)";
+        headerMicBtn.style.color = "#EF4444";
         if (inlineMicBtn) {
             inlineMicBtn.classList.add('muted');
-            inlineMicBtn.innerHTML = "🔇";
+            inlineMicBtn.innerHTML = "🎤❌";
         }
     } else {
         headerMicBtn.classList.add('active');
         headerMicBtn.classList.remove('muted');
         headerMicBtn.innerHTML = "🎤";
+        headerMicBtn.style.backgroundColor = "";
+        headerMicBtn.style.color = "";
         if (inlineMicBtn) {
             inlineMicBtn.classList.remove('muted');
             inlineMicBtn.innerHTML = "🎤";
         }
+    }
+}
+
+function updateCamButtons() {
+    const camBtn = document.getElementById('camToggleBtn');
+
+    if (!localCamStream) {
+        camBtn.classList.remove('active');
+        camBtn.innerHTML = "📹❌"; // Google Meet style crossed-out camera
+        camBtn.style.backgroundColor = "rgba(239, 68, 68, 0.2)";
+        camBtn.style.color = "#EF4444";
+    } else {
+        camBtn.classList.add('active');
+        camBtn.innerHTML = "📹";
+        camBtn.style.backgroundColor = "";
+        camBtn.style.color = "";
     }
 }
 
@@ -482,12 +508,12 @@ function addVideoBox(peerName, stream, isLocal = false) {
     if (box) {
         enableCamDragging(box);
         const video = box.querySelector('video');
-        
+
         // Only reassign if it is a genuinely new WebRTC stream
         if (video.srcObject !== stream) {
             video.srcObject = stream;
         }
-        
+
         video.play().catch(e => console.warn(`[UI] Re-play failed for ${peerName}`, e));
         return;
     }
@@ -601,7 +627,7 @@ async function handleCamSignal(sender, signal) {
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             sendCamSignal(sender, { sdp: pc.localDescription, camOn: !!localCamStream, micOn: !!localMicStream && !isMicMuted });
-            
+
             // Wait 100ms for the event loop to clear before allowing new negotiations
             setTimeout(() => { negState.suppressNegotiation = false; }, 100);
 
@@ -862,9 +888,9 @@ function onMessageReceived(payload) {
         if (data.sender !== username && (localCamStream || localMicStream)) {
             // If I am already broadcasting, send my feed to the new user immediately
             if (typeof createCamPeerConnection === "function") {
-                createCamPeerConnection(data.sender).catch(() => {});
+                createCamPeerConnection(data.sender).catch(() => { });
             } else if (typeof createMediaPeerConnection === "function") {
-                createMediaPeerConnection(data.sender).catch(() => {});
+                createMediaPeerConnection(data.sender).catch(() => { });
             }
         }
     }
