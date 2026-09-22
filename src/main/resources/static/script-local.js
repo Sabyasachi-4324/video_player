@@ -44,7 +44,19 @@ const negotiationState = {};
 // relay media, or that pair of peers will NEVER connect no matter how many
 // times ICE is restarted. Replace with your own TURN credentials.
 const rtcConfig = {
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+    iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        {
+            urls: 'turn:openrelay.metered.ca:80',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+        },
+        {
+            urls: 'turn:openrelay.metered.ca:443',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+        }
+    ],
     iceTransportPolicy: 'all'
 };
 
